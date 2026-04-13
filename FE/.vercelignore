@@ -1,0 +1,11 @@
+node_modules
+.next
+*.log
+.env.local
+.env.*.local
+.git
+.vscode
+.idea
+coverage
+.vercel
+yarn-error.log

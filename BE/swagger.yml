@@ -1,0 +1,5774 @@
+openapi: 3.0.4
+info:
+  title: Marketplace API
+  description: |
+    API documentation for Digital Marketplace Backend
+
+    ## Authentication
+    Most endpoints require authentication. Include the JWT token in the Authorization header:
+    ```
+    Authorization: Bearer <your-token>
+    ```
+
+    ## Roles
+    - **CUSTOMER**: Regular customer who can purchase products
+    - **SELLER**: Seller who can create and manage products
+    - **ADMIN**: System administrator with full access
+    - **MODERATOR**: Moderator who can review and manage content
+  version: 1.0.0
+  contact:
+    email: support@marketplace.com
+  license:
+    name: ISC
+
+servers:
+  - url: http://localhost:3001
+    description: Local development server
+  - url: http://localhost:9999
+    description: Alternative local port
+
+tags:
+  - name: Health
+    description: Health check endpoints
+  - name: Auth
+    description: Authentication endpoints
+  - name: Users
+    description: User management endpoints
+  - name: Shops
+    description: Shop management endpoints
+  - name: Products
+    description: Product management endpoints
+  - name: Orders
+    description: Order management endpoints
+  - name: Disbursement
+    description: |
+      Hệ thống giải ngân Escrow - Xử lý release tiền sau 72h.
+
+      ## Luồng Giải Ngân
+      1. **Order được tạo** → Tiền vào holdBalance (Escrow)
+      2. **Sau 72h** → Auto-disbursement release tiền cho seller
+      3. **Nếu có khiếu nại** → Chờ xử lý trước khi release
+      4. **Platform fee 5%** được trừ khi release
+  - name: Uploads
+    description: File upload endpoints
+  - name: Support
+    description: Chat, Conversations, Messages and Support Tickets
+  - name: Complaints
+    description: |
+      Hệ thống khiếu nại - Moderator/Admin xử lý trực tiếp.
+
+      ## Luồng Khiếu Nại
+      1. **Người mua** tạo khiếu nại → Vào hàng đợi Moderator ngay lập tức
+      2. **Moderator** nhận và xử lý khiếu nại
+      3. **Moderator/Admin** đưa ra quyết định
+      4. **Kháng cáo** có thể được nộp trong 72 giờ sau quyết định
+  - name: Admin Reports
+    description: |
+      Hệ thống báo cáo thống kê dành cho Admin.
+
+      ## Các loại báo cáo
+      - **Revenue**: Doanh thu, platform fee, xu hướng doanh thu
+      - **Orders**: Đơn hàng theo trạng thái, phương thức thanh toán
+      - **Complaints**: Khiếu nại, SLA compliance, hiệu suất moderator
+      - **Dashboard**: Tổng quan hệ thống
+
+      ## Query Parameters
+      - `startDate`: Ngày bắt đầu (ISO 8601)
+      - `endDate`: Ngày kết thúc (ISO 8601)
+      - `granularity`: day | week | month
+  - name: Seller Reports
+    description: |
+      Hệ thống báo cáo thống kê dành cho Seller.
+
+      ## Các loại báo cáo
+      - **Dashboard**: Tổng quan shop
+      - **Revenue**: Doanh thu shop, net revenue sau platform fee
+      - **Orders**: Đơn hàng của shop theo trạng thái
+
+paths:
+  /health:
+    get:
+      summary: Health check
+      description: Check if the server is running
+      tags:
+        - Health
+      responses:
+        '200':
+          description: Server is running
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: ok
+                  timestamp:
+                    type: string
+                    format: date-time
+                  environment:
+                    type: string
+                    example: development
+
+  /api/auth/register:
+    post:
+      summary: Register a new user
+      description: Register a new customer account
+      tags:
+        - Auth
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - email
+                - password
+                - fullName
+              properties:
+                email:
+                  type: string
+                  format: email
+                  example: user@example.com
+                password:
+                  type: string
+                  format: password
+                  example: Aa@12345
+                fullName:
+                  type: string
+                  minLength: 2
+                  example: John Doe
+                phone:
+                  type: string
+                  nullable: true
+                  example: "+84123456789"
+      responses:
+        '201':
+          description: User registered successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  message:
+                    type: string
+                    example: User registered successfully
+                  data:
+                    type: object
+                    properties:
+                      id:
+                        type: string
+                      email:
+                        type: string
+                      fullName:
+                        type: string
+        '400':
+          description: Bad request (email already exists, validation error)
+        '500':
+          description: Internal server error
+
+  /api/auth/register/seller:
+    post:
+      summary: Register a new seller
+      description: Register a new seller account
+      tags:
+        - Auth
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - email
+                - password
+                - fullName
+              properties:
+                email:
+                  type: string
+                  format: email
+                  example: seller@example.com
+                password:
+                  type: string
+                  format: password
+                  example: Aa@12345
+                fullName:
+                  type: string
+                  minLength: 2
+                  example: Jane Seller
+                phone:
+                  type: string
+                  nullable: true
+      responses:
+        '201':
+          description: Seller registered successfully
+        '400':
+          description: Bad request
+        '500':
+          description: Internal server error
+
+  /api/auth/login:
+    post:
+      summary: Login
+      description: Authenticate user and get JWT tokens
+      tags:
+        - Auth
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - email
+                - password
+              properties:
+                email:
+                  type: string
+                  format: email
+                  example: user@example.com
+                password:
+                  type: string
+                  format: password
+                  example: Aa@12345
+      responses:
+        '200':
+          description: Login successful
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  message:
+                    type: string
+                    example: Login successful
+                  data:
+                    type: object
+                    properties:
+                      user:
+                        type: object
+                        properties:
+                          id:
+                            type: string
+                          email:
+                            type: string
+                          fullName:
+                            type: string
+                          roleKey:
+                            type: string
+                            enum: [CUSTOMER, SELLER, ADMIN, MODERATOR]
+                      token:
+                        type: string
+                        description: JWT access token
+                      refreshToken:
+                        type: string
+                        description: JWT refresh token
+        '401':
+          description: Invalid email or password
+        '403':
+          description: Account is locked or banned
+        '429':
+          description: Too many login attempts
+
+  /api/auth/refresh:
+    post:
+      summary: Refresh access token
+      description: Get a new access token using refresh token
+      tags:
+        - Auth
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                refreshToken:
+                  type: string
+                  example: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
+      responses:
+        '200':
+          description: Token refreshed successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  data:
+                    type: object
+                    properties:
+                      token:
+                        type: string
+        '401':
+          description: Invalid refresh token
+
+  /api/auth/logout:
+    post:
+      summary: Logout
+      description: Logout user (clears refresh token cookie)
+      tags:
+        - Auth
+      responses:
+        '200':
+          description: Logout successful
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  message:
+                    type: string
+                    example: Logout successful
+
+  /api/auth/me:
+    get:
+      summary: Get current user
+      description: Get information about the currently authenticated user
+      tags:
+        - Auth
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: User information
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  data:
+                    type: object
+                    properties:
+                      id:
+                        type: string
+                      email:
+                        type: string
+                      fullName:
+                        type: string
+                      phone:
+                        type: string
+                        nullable: true
+                      avatarUrl:
+                        type: string
+                        nullable: true
+                      roleKey:
+                        type: string
+                      roleName:
+                        type: string
+                      emailVerified:
+                        type: boolean
+                      phoneVerified:
+                        type: boolean
+                      trustLevel:
+                        type: number
+                      status:
+                        type: string
+                        enum: [Active, Locked, Banned]
+                      createdAt:
+                        type: string
+                        format: date-time
+                      updatedAt:
+                        type: string
+                        format: date-time
+        '401':
+          description: Unauthorized
+
+  /api/auth/change-password:
+    put:
+      summary: Change password
+      description: Change user password (requires authentication)
+      tags:
+        - Auth
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - currentPassword
+                - newPassword
+              properties:
+                currentPassword:
+                  type: string
+                  format: password
+                  example: OldPass@123
+                newPassword:
+                  type: string
+                  format: password
+                  example: NewPass@123
+      responses:
+        '200':
+          description: Password changed successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  message:
+                    type: string
+                    example: Password changed successfully
+        '400':
+          description: Current password is incorrect
+        '401':
+          description: Unauthorized
+
+  # User endpoints
+  /api/users/profile:
+    get:
+      summary: Get my profile
+      tags:
+        - Users
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Profile
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  data:
+                    $ref: '#/components/schemas/UserProfile'
+        '401':
+          description: Unauthorized
+        '403':
+          description: Forbidden
+    put:
+      summary: Update my profile
+      tags:
+        - Users
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UserProfileUpdateRequest'
+      responses:
+        '200':
+          description: Updated
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  message:
+                    type: string
+                  data:
+                    $ref: '#/components/schemas/UserProfile'
+        '401':
+          description: Unauthorized
+        '403':
+          description: Forbidden
+
+  /api/users/{userId}:
+    get:
+      summary: Get user by ID (Admin)
+      tags:
+        - Users
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: userId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: User
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  data:
+                    $ref: '#/components/schemas/User'
+        '401':
+          description: Unauthorized
+        '403':
+          description: Forbidden
+        '404':
+          description: User not found
+
+  # Upload endpoints
+  /api/uploads/image:
+    post:
+      summary: Upload product image (single)
+      description: Upload an image file and get a public URL. Requires authentication.
+      tags:
+        - Uploads
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required:
+                - file
+              properties:
+                file:
+                  type: string
+                  format: binary
+      responses:
+        '201':
+          description: Uploaded successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  data:
+                    type: object
+                    properties:
+                      filename:
+                        type: string
+                      mimetype:
+                        type: string
+                      size:
+                        type: integer
+                      path:
+                        type: string
+                        example: uploads/1700000000000-123.png
+                      url:
+                        type: string
+                        example: /uploads/1700000000000-123.png
+        '400':
+          description: Bad request
+        '401':
+          description: Unauthorized
+
+  # Shop endpoints
+  /api/shops:
+    post:
+      summary: Create shop (Seller application)
+      description: Customer creates a shop to become a seller. Shop will be pending until approved by moderator.
+      tags:
+        - Shops
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - shopName
+              properties:
+                shopName:
+                  type: string
+                  minLength: 2
+                  maxLength: 100
+                  example: My Awesome Shop
+                description:
+                  type: string
+                  maxLength: 500
+                  nullable: true
+                  example: This is my shop description
+      responses:
+        '201':
+          description: Shop created successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ShopResponse'
+        '400':
+          description: Bad request (shop already exists, validation error)
+        '401':
+          description: Unauthorized
+        '403':
+          description: Forbidden (no permission)
+
+  /api/shops/me/my-shop:
+    get:
+      summary: Get my shop
+      description: Get the current user's shop
+      tags:
+        - Shops
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Shop details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ShopResponse'
+        '401':
+          description: Unauthorized
+        '404':
+          description: Shop not found
+
+  /api/shops/applications/pending:
+    get:
+      summary: Get pending shop applications (Moderator)
+      description: Get all shops pending approval. Requires SELLER_VIEW_APPLICATIONS permission.
+      tags:
+        - Shops
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: List of pending shops
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Shop'
+        '401':
+          description: Unauthorized
+        '403':
+          description: Forbidden (no permission)
+
+  /api/shops/{shopId}:
+    get:
+      summary: Get shop by ID
+      description: Get shop details by ID (public)
+      tags:
+        - Shops
+      parameters:
+        - name: shopId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Shop details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ShopResponse'
+        '404':
+          description: Shop not found
+    put:
+      summary: Update shop
+      description: Update shop details. Only shop owner can update.
+      tags:
+        - Shops
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: shopId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                shopName:
+                  type: string
+                  minLength: 2
+                  maxLength: 100
+                description:
+                  type: string
+                  maxLength: 500
+                  nullable: true
+      responses:
+        '200':
+          description: Shop updated successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ShopResponse'
+        '401':
+          description: Unauthorized
+        '403':
+          description: Forbidden (not shop owner)
+        '404':
+          description: Shop not found
+
+  /api/shops/{shopId}/approve:
+    patch:
+      summary: Approve shop (Moderator)
+      description: Approve a pending shop application. Requires SELLER_APPROVE permission.
+      tags:
+        - Shops
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: shopId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                moderatorNote:
+                  type: string
+                  maxLength: 1000
+                  example: Approved. Welcome to the platform!
+      responses:
+        '200':
+          description: Shop approved successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ShopResponse'
+        '401':
+          description: Unauthorized
+        '403':
+          description: Forbidden (no permission)
+        '404':
+          description: Shop not found
+
+  /api/shops/{shopId}/reject:
+    patch:
+      summary: Reject shop (Moderator)
+      description: Reject a pending shop application. Requires SELLER_REJECT permission.
+      tags:
+        - Shops
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: shopId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                moderatorNote:
+                  type: string
+                  maxLength: 1000
+                  example: Please provide more details about your shop.
+      responses:
+        '200':
+          description: Shop rejected
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ShopResponse'
+        '401':
+          description: Unauthorized
+        '403':
+          description: Forbidden (no permission)
+        '404':
+          description: Shop not found
+
+  # Product endpoints
+  /api/products:
+    get:
+      summary: List products (public)
+      description: List products. Products are published immediately by seller.
+      tags:
+        - Products
+      parameters:
+        - name: shopId
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: platformId
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: planType
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [Personal, Family, Slot, Shared, InviteLink]
+        - name: minPrice
+          in: query
+          required: false
+          schema:
+            type: number
+        - name: maxPrice
+          in: query
+          required: false
+          schema:
+            type: number
+        - name: page
+          in: query
+          required: false
+          schema:
+            type: integer
+            default: 1
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            default: 20
+      responses:
+        '200':
+          description: Products list
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Product'
+                  pagination:
+                    type: object
+                    properties:
+                      page:
+                        type: integer
+                      limit:
+                        type: integer
+                      total:
+                        type: integer
+                      totalPages:
+                        type: integer
+    post:
+      summary: Create product (Seller)
+      description: Create product. Product is published immediately (no moderator approval).
+      tags:
+        - Products
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ProductCreateRequest'
+      responses:
+        '201':
+          description: Product created
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  message:
+                    type: string
+                  data:
+                    $ref: '#/components/schemas/Product'
+        '400':
+          description: Validation error
+        '401':
+          description: Unauthorized
+        '403':
+          description: Forbidden
+
+  /api/products/{productId}:
+    get:
+      summary: Get product by ID (public)
+      tags:
+        - Products
+      parameters:
+        - name: productId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Product details
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  data:
+                    $ref: '#/components/schemas/Product'
+        '404':
+          description: Product not found
+    put:
+      summary: Update product (Seller)
+      tags:
+        - Products
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: productId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ProductUpdateRequest'
+      responses:
+        '200':
+          description: Product updated
+        '401':
+          description: Unauthorized
+        '403':
+          description: Forbidden
+        '404':
+          description: Product not found
+    delete:
+      summary: Delete product (Seller)
+      tags:
+        - Products
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: productId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Product deleted
+        '401':
+          description: Unauthorized
+        '403':
+          description: Forbidden
+        '404':
+          description: Product not found
+
+  /api/products/shop/{shopId}:
+    get:
+      summary: Get products of my shop (Seller)
+      tags:
+        - Products
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: shopId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Products list
+        '401':
+          description: Unauthorized
+        '403':
+          description: Forbidden
+
+  /api/products/me/{productId}:
+    get:
+      summary: Get my product by ID (Seller)
+      tags:
+        - Products
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: productId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Product
+        '401':
+          description: Unauthorized
+        '403':
+          description: Forbidden
+        '404':
+          description: Product not found
+
+  # Orders endpoints
+  /api/orders:
+    post:
+      summary: Create a new order
+      description: Create a new order from cart items. Payment will be processed via wallet or external provider.
+      tags:
+        - Orders
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateOrderRequest'
+      responses:
+        '201':
+          description: Order created successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CreateOrderResponse'
+        '400':
+          description: Bad request (validation error)
+        '401':
+          description: Unauthorized
+        '402':
+          description: Insufficient balance
+        '404':
+          description: Product not found
+    get:
+      summary: Get my orders
+      description: Get orders for the current authenticated customer
+      tags:
+        - Orders
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            default: 10
+          description: Number of orders to return
+        - name: skip
+          in: query
+          required: false
+          schema:
+            type: integer
+            default: 0
+          description: Number of orders to skip (pagination)
+        - name: status
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [PendingPayment, Paid, Completed, Cancelled, Disputed, Refunded]
+          description: Filter by order status
+      responses:
+        '200':
+          description: List of orders
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MyOrdersResponse'
+        '401':
+          description: Unauthorized
+
+  /api/orders/code/{orderCode}:
+    get:
+      summary: Get order by order code
+      description: Get order details by order code (e.g. ORD-XXXXXX)
+      tags:
+        - Orders
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: orderCode
+          in: path
+          required: true
+          schema:
+            type: string
+          description: Order code (e.g. ORD-XXXXXX)
+      responses:
+        '200':
+          description: Order details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OrderDetailResponse'
+        '401':
+          description: Unauthorized
+        '403':
+          description: Forbidden - not your order
+        '404':
+          description: Order not found
+
+  /api/orders/{orderId}:
+    get:
+      summary: Get order by ID
+      description: Get order details by MongoDB ObjectId
+      tags:
+        - Orders
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: orderId
+          in: path
+          required: true
+          schema:
+            type: string
+          description: Order MongoDB ObjectId
+      responses:
+        '200':
+          description: Order details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OrderDetailResponse'
+        '401':
+          description: Unauthorized
+        '403':
+          description: Forbidden - not your order
+        '404':
+          description: Order not found
+
+  /api/orders/items/{itemId}/confirm:
+    post:
+      summary: Confirm delivery of an order item
+      description: Customer confirms receipt of the delivered product. This will complete the order item and release funds to the seller.
+      tags:
+        - Orders
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: itemId
+          in: path
+          required: true
+          schema:
+            type: string
+          description: Order item MongoDB ObjectId
+      responses:
+        '200':
+          description: Delivery confirmed successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConfirmDeliveryResponse'
+        '400':
+          description: Bad request - item not in correct status
+        '401':
+          description: Unauthorized
+        '403':
+          description: Forbidden - not your order
+        '404':
+          description: Order item not found
+
+  /api/orders/seller/items:
+    get:
+      summary: Get order items for current seller
+      description: Returns flattened order items with customer info, product info and delivered credential (decrypted).
+      tags:
+        - Orders
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            default: 50
+        - name: skip
+          in: query
+          required: false
+          schema:
+            type: integer
+            default: 0
+        - name: status
+          in: query
+          required: false
+          schema:
+            type: string
+            description: Filter by itemStatus (e.g. Delivered, WaitingDelivery, Disputed, Completed, Refunded)
+      responses:
+        '200':
+          description: Seller order items
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SellerOrderItemsResponse'
+        '401':
+          description: Unauthorized
+        '403':
+          description: Forbidden
+
+  /api/orders/{orderId}/cancel:
+    post:
+      summary: Cancel order by buyer
+      description: |
+        Buyer cancels their order. Conditions:
+        - PendingPayment orders: Cancel without refund
+        - Paid orders (before delivery): Full refund from holdBalance to balance
+        - Cannot cancel if items already delivered
+      tags:
+        - Orders
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: orderId
+          in: path
+          required: true
+          schema:
+            type: string
+          description: Order MongoDB ObjectId
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CancelOrderRequest'
+      responses:
+        '200':
+          description: Order cancelled successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CancelOrderResponse'
+        '400':
+          description: Bad request - cannot cancel (already delivered, completed, etc.)
+        '401':
+          description: Unauthorized
+        '403':
+          description: Forbidden - not your order
+        '404':
+          description: Order not found
+
+  /api/orders/{orderId}/seller-cancel:
+    post:
+      summary: Cancel order by seller
+      description: |
+        Seller cancels an order. Conditions:
+        - Order must be in "Paid" status
+        - Must be within 24 hours of order creation
+        - Full refund from holdBalance to customer's balance
+      tags:
+        - Orders
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: orderId
+          in: path
+          required: true
+          schema:
+            type: string
+          description: Order MongoDB ObjectId
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CancelOrderRequest'
+      responses:
+        '200':
+          description: Order cancelled successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CancelOrderResponse'
+        '400':
+          description: Bad request - cannot cancel (past 24h, wrong status, etc.)
+        '401':
+          description: Unauthorized
+        '403':
+          description: Forbidden - not your order items
+        '404':
+          description: Order not found
+
+  /api/orders/{orderId}/escrow-status:
+    get:
+      summary: Get escrow status for an order
+      description: |
+        Get detailed escrow status for each order item including:
+        - Hold amount and status (Holding/Released/Refunded)
+        - Time remaining until auto-release
+        - Complaint deadline and eligibility
+
+        Both customer and seller can view this information.
+      tags:
+        - Orders
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: orderId
+          in: path
+          required: true
+          schema:
+            type: string
+          description: Order MongoDB ObjectId
+      responses:
+        '200':
+          description: Escrow status details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EscrowStatusResponse'
+        '401':
+          description: Unauthorized
+        '403':
+          description: Forbidden - not authorized to view this order
+        '404':
+          description: Order not found
+
+  # Disbursement endpoints
+  /api/disbursement/cron/process:
+    get:
+      summary: Process pending disbursements (Cron)
+      description: |
+        Cron job endpoint to process all pending disbursements.
+        Protected by CRON_SECRET header or query parameter.
+
+        This endpoint:
+        - Finds all order items past 72h hold period
+        - Skips items with open complaints
+        - Releases funds to sellers (minus 5% platform fee)
+        - Creates WalletTransaction audit records
+      tags:
+        - Disbursement
+      parameters:
+        - name: x-cron-secret
+          in: header
+          required: false
+          schema:
+            type: string
+          description: Cron secret key
+        - name: secret
+          in: query
+          required: false
+          schema:
+            type: string
+          description: Cron secret key (alternative)
+      responses:
+        '200':
+          description: Disbursement processing result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DisbursementProcessResponse'
+        '401':
+          description: Unauthorized - invalid cron secret
+
+  /api/disbursement/holding:
+    get:
+      summary: Get ALL holding items (Admin)
+      description: |
+        Get list of ALL order items currently in escrow (holdStatus = "Holding").
+        Unlike /pending, this returns items regardless of how long they've been held.
+
+        Useful for:
+        - Monitoring all current escrow items
+        - Tracking new orders in real-time
+        - Debugging and testing
+      tags:
+        - Disbursement
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 50
+        - name: skip
+          in: query
+          schema:
+            type: integer
+            default: 0
+        - name: shopId
+          in: query
+          schema:
+            type: string
+          description: Filter by shop ID
+      responses:
+        '200':
+          description: All holding items list
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HoldingItemsResponse'
+        '401':
+          description: Unauthorized
+        '403':
+          description: Forbidden - admin/moderator only
+
+  /api/disbursement/pending:
+    get:
+      summary: Get pending disbursements (Admin)
+      description: |
+        Get list of order items ready for disbursement (past 72h hold).
+        Shows complaint status for each item.
+      tags:
+        - Disbursement
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 50
+        - name: skip
+          in: query
+          schema:
+            type: integer
+            default: 0
+      responses:
+        '200':
+          description: Pending disbursements list
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PendingDisbursementsResponse'
+        '401':
+          description: Unauthorized
+        '403':
+          description: Forbidden - admin/moderator only
+
+  /api/disbursement/{itemId}:
+    post:
+      summary: Manual trigger disbursement (Admin)
+      description: |
+        Manually trigger disbursement for a single order item.
+        Validates all conditions before processing.
+      tags:
+        - Disbursement
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: itemId
+          in: path
+          required: true
+          schema:
+            type: string
+          description: Order item MongoDB ObjectId
+      responses:
+        '200':
+          description: Disbursement result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DisbursementTriggerResponse'
+        '400':
+          description: Bad request - cannot disburse (complaint exists, not past 72h, etc.)
+        '401':
+          description: Unauthorized
+        '403':
+          description: Forbidden - admin/moderator only
+        '404':
+          description: Order item not found
+
+  /api/disbursement/stats:
+    get:
+      summary: Get disbursement statistics (Admin)
+      description: |
+        Get escrow and disbursement statistics including:
+        - Current holding amounts
+        - Released/refunded in last 30 days
+        - Items ready for disbursement
+      tags:
+        - Disbursement
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Disbursement statistics
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DisbursementStatsResponse'
+        '401':
+          description: Unauthorized
+        '403':
+          description: Forbidden - admin/moderator only
+
+  # Support - Conversations
+  /api/support/conversations:
+    get:
+      summary: Get conversations
+      description: Get conversations for current user based on their role
+      tags:
+        - Support
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: type
+          in: query
+          schema:
+            type: string
+            enum: [OrderItem, Shop, Support]
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [Open, Closed, Blocked]
+        - name: page
+          in: query
+          schema:
+            type: integer
+            default: 1
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 20
+      responses:
+        '200':
+          description: Conversations list
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConversationsResponse'
+        '401':
+          description: Unauthorized
+    post:
+      summary: Create conversation
+      description: Create a new conversation (Shop or OrderItem type)
+      tags:
+        - Support
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateConversationRequest'
+      responses:
+        '201':
+          description: Conversation created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConversationResponse'
+        '400':
+          description: Bad request
+        '401':
+          description: Unauthorized
+
+  /api/support/conversations/unread-count:
+    get:
+      summary: Get total unread count
+      description: Get total unread messages count across all conversations
+      tags:
+        - Support
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Unread count
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  data:
+                    type: object
+                    properties:
+                      unreadCount:
+                        type: integer
+        '401':
+          description: Unauthorized
+
+  /api/support/conversations/{id}:
+    get:
+      summary: Get conversation by ID
+      description: Get conversation details with access control
+      tags:
+        - Support
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Conversation details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConversationResponse'
+        '401':
+          description: Unauthorized
+        '403':
+          description: Forbidden
+        '404':
+          description: Conversation not found
+
+  /api/support/conversations/{id}/status:
+    patch:
+      summary: Update conversation status
+      description: Update conversation status (Close, Block)
+      tags:
+        - Support
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - status
+              properties:
+                status:
+                  type: string
+                  enum: [Open, Closed, Blocked]
+      responses:
+        '200':
+          description: Status updated
+        '401':
+          description: Unauthorized
+        '403':
+          description: Forbidden
+        '404':
+          description: Conversation not found
+
+  /api/support/conversations/{id}/read:
+    post:
+      summary: Mark conversation as read
+      description: Mark all messages in conversation as read for current user
+      tags:
+        - Support
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Marked as read
+        '401':
+          description: Unauthorized
+        '404':
+          description: Conversation not found
+
+  # Support - Messages
+  /api/support/messages:
+    post:
+      summary: Send message
+      description: Send a message to a conversation
+      tags:
+        - Support
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SendMessageRequest'
+      responses:
+        '201':
+          description: Message sent
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MessageResponse'
+        '400':
+          description: Bad request
+        '401':
+          description: Unauthorized
+        '403':
+          description: Forbidden
+
+  /api/support/messages/{conversationId}:
+    get:
+      summary: Get messages
+      description: Get messages for a conversation with pagination
+      tags:
+        - Support
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: conversationId
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: page
+          in: query
+          schema:
+            type: integer
+            default: 1
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 50
+        - name: before
+          in: query
+          description: Get messages before this timestamp (for pagination)
+          schema:
+            type: string
+            format: date-time
+      responses:
+        '200':
+          description: Messages list
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MessagesResponse'
+        '401':
+          description: Unauthorized
+        '403':
+          description: Forbidden
+
+  /api/support/messages/{id}:
+    delete:
+      summary: Delete message
+      description: Soft delete a message (only sender can delete)
+      tags:
+        - Support
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Message deleted
+        '401':
+          description: Unauthorized
+        '403':
+          description: Forbidden
+        '404':
+          description: Message not found
+
+  /api/support/messages/search:
+    get:
+      summary: Search messages
+      description: Search messages across conversations
+      tags:
+        - Support
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: q
+          in: query
+          required: true
+          schema:
+            type: string
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 20
+      responses:
+        '200':
+          description: Search results
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Message'
+        '401':
+          description: Unauthorized
+
+  # Support - Tickets
+  /api/support/tickets:
+    get:
+      summary: Get tickets
+      description: Get support tickets with filtering
+      tags:
+        - Support
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [Open, InReview, NeedMoreInfo, Resolved, Closed]
+        - name: priority
+          in: query
+          schema:
+            type: string
+            enum: [Low, Medium, High, Urgent]
+        - name: type
+          in: query
+          schema:
+            type: string
+            enum: [Complaint, Dispute, General]
+        - name: assignedToUserId
+          in: query
+          schema:
+            type: string
+        - name: page
+          in: query
+          schema:
+            type: integer
+            default: 1
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 20
+      responses:
+        '200':
+          description: Tickets list
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TicketsResponse'
+        '401':
+          description: Unauthorized
+    post:
+      summary: Create ticket
+      description: Create a support ticket for an order item
+      tags:
+        - Support
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateTicketRequest'
+      responses:
+        '201':
+          description: Ticket created
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  data:
+                    type: object
+                    properties:
+                      ticket:
+                        $ref: '#/components/schemas/Ticket'
+                      conversationId:
+                        type: string
+        '400':
+          description: Bad request
+        '401':
+          description: Unauthorized
+
+  /api/support/tickets/stats:
+    get:
+      summary: Get ticket statistics
+      description: Get ticket statistics (count by status, priority, avg resolution time)
+      tags:
+        - Support
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Ticket stats
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  data:
+                    $ref: '#/components/schemas/TicketStats'
+        '401':
+          description: Unauthorized
+
+  /api/support/tickets/{id}:
+    get:
+      summary: Get ticket by ID
+      description: Get ticket details with access control
+      tags:
+        - Support
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Ticket details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TicketResponse'
+        '401':
+          description: Unauthorized
+        '403':
+          description: Forbidden
+        '404':
+          description: Ticket not found
+    patch:
+      summary: Update ticket
+      description: Update ticket (status, priority, resolution)
+      tags:
+        - Support
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateTicketRequest'
+      responses:
+        '200':
+          description: Ticket updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TicketResponse'
+        '401':
+          description: Unauthorized
+        '403':
+          description: Forbidden
+        '404':
+          description: Ticket not found
+
+  /api/support/tickets/{id}/assign:
+    post:
+      summary: Assign ticket to staff
+      description: Assign ticket to a staff member (Moderator/Admin only)
+      tags:
+        - Support
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - staffUserId
+              properties:
+                staffUserId:
+                  type: string
+      responses:
+        '200':
+          description: Ticket assigned
+        '401':
+          description: Unauthorized
+        '403':
+          description: Forbidden
+        '404':
+          description: Ticket not found
+
+  /api/support/tickets/{id}/escalate:
+    post:
+      summary: Escalate ticket
+      description: Escalate ticket priority (Moderator/Admin only)
+      tags:
+        - Support
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                reason:
+                  type: string
+      responses:
+        '200':
+          description: Ticket escalated
+        '401':
+          description: Unauthorized
+        '403':
+          description: Forbidden
+        '404':
+          description: Ticket not found
+
+  # ===== COMPLAINT ENDPOINTS =====
+
+  # Buyer Endpoints
+  /api/complaints:
+    get:
+      summary: Lấy tất cả khiếu nại (Admin/Moderator)
+      description: Lấy danh sách khiếu nại với bộ lọc. Yêu cầu quyền COMPLAINT_VIEW_ALL.
+      tags:
+        - Complaints
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: status
+          in: query
+          schema:
+            type: string
+        - name: category
+          in: query
+          schema:
+            $ref: '#/components/schemas/ComplaintCategory'
+        - name: priority
+          in: query
+          schema:
+            type: string
+            enum: [Low, Medium, High, Urgent]
+        - name: escalationLevel
+          in: query
+          schema:
+            type: string
+            enum: [Level2_Moderator, Level3_SeniorMod, Level4_Admin]
+        - name: assignedToUserId
+          in: query
+          schema:
+            type: string
+        - name: isHighValue
+          in: query
+          schema:
+            type: string
+            enum: ['true', 'false']
+        - name: sortBy
+          in: query
+          schema:
+            type: string
+            enum: [createdAt, updatedAt, calculatedPriority, orderValue]
+            default: createdAt
+        - name: sortOrder
+          in: query
+          schema:
+            type: string
+            enum: [asc, desc]
+            default: desc
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 20
+            maximum: 100
+        - name: skip
+          in: query
+          schema:
+            type: integer
+            default: 0
+      responses:
+        '200':
+          description: Danh sách khiếu nại
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ComplaintsListResponse'
+        '401':
+          description: Unauthorized
+        '403':
+          description: Forbidden
+    post:
+      summary: Tạo khiếu nại mới (Buyer)
+      description: Người mua tạo khiếu nại cho đơn hàng. Khiếu nại sẽ được tự động gán cho Moderator ngay lập tức.
+      tags:
+        - Complaints
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateComplaintRequest'
+      responses:
+        '201':
+          description: Khiếu nại được tạo thành công
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ComplaintResponse'
+        '400':
+          description: Validation error
+        '401':
+          description: Unauthorized
+        '409':
+          description: Đã có khiếu nại cho đơn hàng này
+
+  /api/complaints/me:
+    get:
+      summary: Lấy khiếu nại của tôi (Buyer)
+      description: Lấy danh sách khiếu nại mà người mua đã tạo
+      tags:
+        - Complaints
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: status
+          in: query
+          schema:
+            type: string
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 20
+        - name: skip
+          in: query
+          schema:
+            type: integer
+            default: 0
+      responses:
+        '200':
+          description: Danh sách khiếu nại của tôi
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ComplaintsListResponse'
+        '401':
+          description: Unauthorized
+
+  /api/complaints/queue:
+    get:
+      summary: Lấy danh sách khiếu nại được gán (Moderator)
+      description: Lấy danh sách khiếu nại đã được tự động gán cho moderator theo mức ưu tiên
+      tags:
+        - Complaints
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [Assigned, InProgress, Completed]
+          description: Trạng thái khiếu nại (InQueue không còn sử dụng - tự động gán)
+        - name: isHighValue
+          in: query
+          schema:
+            type: string
+            enum: ['true', 'false']
+        - name: assignedModeratorId
+          in: query
+          schema:
+            type: string
+        - name: sortBy
+          in: query
+          schema:
+            type: string
+            enum: [queuePriority, addedToQueueAt, orderValue]
+            default: queuePriority
+        - name: sortOrder
+          in: query
+          schema:
+            type: string
+            enum: [asc, desc]
+            default: desc
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 20
+        - name: skip
+          in: query
+          schema:
+            type: integer
+            default: 0
+      responses:
+        '200':
+          description: Danh sách hàng đợi khiếu nại
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ComplaintQueueResponse'
+        '401':
+          description: Unauthorized
+        '403':
+          description: Forbidden
+
+  /api/complaints/queue/stats:
+    get:
+      summary: Lấy thống kê khiếu nại (Moderator)
+      description: Lấy thống kê về khiếu nại (totalInQueue sẽ luôn = 0 vì tự động gán)
+      tags:
+        - Complaints
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Thống kê hàng đợi
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/QueueStatsResponse'
+        '401':
+          description: Unauthorized
+        '403':
+          description: Forbidden
+
+  # NOTE: /api/complaints/queue/pick removed - complaints are auto-assigned to single moderator
+
+  /api/complaints/moderator/workload:
+    get:
+      summary: Lấy workload của moderators (Admin)
+      description: Lấy thống kê công việc của tất cả moderators
+      tags:
+        - Complaints
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Workload của moderators
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ModeratorWorkloadResponse'
+        '401':
+          description: Unauthorized
+        '403':
+          description: Forbidden
+
+  /api/complaints/check/{orderItemId}:
+    get:
+      summary: Kiểm tra có thể tạo khiếu nại
+      description: Kiểm tra xem có thể tạo khiếu nại cho order item này không
+      tags:
+        - Complaints
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: orderItemId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Kết quả kiểm tra
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  data:
+                    type: object
+                    properties:
+                      canFile:
+                        type: boolean
+                      reason:
+                        type: string
+                        nullable: true
+        '401':
+          description: Unauthorized
+
+  /api/complaints/{id}:
+    get:
+      summary: Lấy chi tiết khiếu nại
+      description: Lấy thông tin chi tiết của một khiếu nại
+      tags:
+        - Complaints
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Chi tiết khiếu nại
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ComplaintResponse'
+        '401':
+          description: Unauthorized
+        '403':
+          description: Forbidden
+        '404':
+          description: Khiếu nại không tồn tại
+
+  /api/complaints/{id}/evidence:
+    post:
+      summary: Thêm bằng chứng (Buyer)
+      description: Người mua thêm bằng chứng cho khiếu nại.
+      tags:
+        - Complaints
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AddEvidenceRequest'
+      responses:
+        '200':
+          description: Bằng chứng đã được thêm
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ComplaintResponse'
+        '400':
+          description: Validation error
+        '401':
+          description: Unauthorized
+        '403':
+          description: Forbidden
+        '404':
+          description: Khiếu nại không tồn tại
+
+  /api/complaints/{id}/assign:
+    post:
+      summary: Gán khiếu nại cho Moderator
+      description: Gán khiếu nại cho moderator cụ thể hoặc tự gán cho mình
+      tags:
+        - Complaints
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                moderatorId:
+                  type: string
+                  description: ID của moderator. Nếu không có, tự gán cho người gọi API.
+      responses:
+        '200':
+          description: Đã gán khiếu nại
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ComplaintResponse'
+        '401':
+          description: Unauthorized
+        '403':
+          description: Forbidden
+        '404':
+          description: Khiếu nại không tồn tại
+
+  /api/complaints/{id}/internal-note:
+    post:
+      summary: Thêm ghi chú nội bộ (Moderator)
+      description: Moderator thêm ghi chú nội bộ, chỉ staff có thể xem
+      tags:
+        - Complaints
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AddInternalNoteRequest'
+      responses:
+        '200':
+          description: Ghi chú đã được thêm
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ComplaintResponse'
+        '400':
+          description: Validation error
+        '401':
+          description: Unauthorized
+        '403':
+          description: Forbidden
+        '404':
+          description: Khiếu nại không tồn tại
+
+  /api/complaints/{id}/request-info:
+    post:
+      summary: Yêu cầu thêm thông tin (Moderator)
+      description: Moderator yêu cầu thêm thông tin từ buyer/seller
+      tags:
+        - Complaints
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RequestInfoRequest'
+      responses:
+        '200':
+          description: Yêu cầu đã được gửi
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ComplaintResponse'
+        '400':
+          description: Validation error
+        '401':
+          description: Unauthorized
+        '403':
+          description: Forbidden
+        '404':
+          description: Khiếu nại không tồn tại
+
+  /api/complaints/{id}/decision:
+    post:
+      summary: Đưa ra quyết định (Moderator)
+      description: Moderator đưa ra quyết định cuối cùng cho khiếu nại
+      tags:
+        - Complaints
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MakeDecisionRequest'
+      responses:
+        '200':
+          description: Quyết định đã được đưa ra
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ComplaintResponse'
+        '400':
+          description: Validation error
+        '401':
+          description: Unauthorized
+        '403':
+          description: Forbidden
+        '404':
+          description: Khiếu nại không tồn tại
+
+  /api/complaints/{id}/appeal:
+    post:
+      summary: Nộp kháng cáo (Buyer/Seller)
+      description: Nộp kháng cáo trong vòng 72 giờ sau quyết định
+      tags:
+        - Complaints
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/FileAppealRequest'
+      responses:
+        '201':
+          description: Kháng cáo đã được nộp
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ComplaintResponse'
+        '400':
+          description: Validation error hoặc đã hết thời hạn kháng cáo
+        '401':
+          description: Unauthorized
+        '403':
+          description: Forbidden
+        '404':
+          description: Khiếu nại không tồn tại
+
+  /api/complaints/{id}/appeal-decision:
+    post:
+      summary: Giải quyết kháng cáo (Admin/Senior Mod)
+      description: Admin hoặc Senior Mod giải quyết kháng cáo
+      tags:
+        - Complaints
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AppealDecisionRequest'
+      responses:
+        '200':
+          description: Kháng cáo đã được giải quyết
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ComplaintResponse'
+        '400':
+          description: Validation error
+        '401':
+          description: Unauthorized
+        '403':
+          description: Forbidden
+        '404':
+          description: Khiếu nại không tồn tại
+
+  /api/complaints/{id}/timeline:
+    get:
+      summary: Lấy timeline khiếu nại
+      description: Lấy lịch sử hoạt động của khiếu nại
+      tags:
+        - Complaints
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Timeline khiếu nại
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ComplaintTimelineResponse'
+        '401':
+          description: Unauthorized
+        '404':
+          description: Khiếu nại không tồn tại
+
+  # ==================== ADMIN REPORTS ====================
+
+  /api/reports/dashboard:
+    get:
+      summary: Admin Dashboard
+      description: Tổng quan hệ thống - revenue, orders, complaints, escrow
+      tags:
+        - Admin Reports
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Dashboard data
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AdminDashboardResponse'
+        '401':
+          description: Unauthorized
+        '403':
+          description: Forbidden - Requires ANALYTICS_VIEW permission
+
+  /api/reports/revenue/overview:
+    get:
+      summary: Revenue Overview
+      description: Tổng quan doanh thu - total revenue, platform fee, seller payouts, escrow
+      tags:
+        - Admin Reports
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/startDate'
+        - $ref: '#/components/parameters/endDate'
+      responses:
+        '200':
+          description: Revenue overview
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RevenueOverviewResponse'
+        '401':
+          description: Unauthorized
+        '403':
+          description: Forbidden
+
+  /api/reports/revenue/platform-fees:
+    get:
+      summary: Platform Fee Report
+      description: Chi tiết platform fee (5%) theo ngày/tuần/tháng
+      tags:
+        - Admin Reports
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/startDate'
+        - $ref: '#/components/parameters/endDate'
+        - $ref: '#/components/parameters/granularity'
+      responses:
+        '200':
+          description: Platform fee breakdown
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PlatformFeeResponse'
+        '401':
+          description: Unauthorized
+        '403':
+          description: Forbidden
+
+  /api/reports/revenue/trends:
+    get:
+      summary: Revenue Trends
+      description: Xu hướng doanh thu theo thời gian
+      tags:
+        - Admin Reports
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/startDate'
+        - $ref: '#/components/parameters/endDate'
+        - $ref: '#/components/parameters/granularity'
+      responses:
+        '200':
+          description: Revenue trends
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RevenueTrendResponse'
+        '401':
+          description: Unauthorized
+        '403':
+          description: Forbidden
+
+  /api/reports/orders/overview:
+    get:
+      summary: Order Overview
+      description: Tổng quan đơn hàng
+      tags:
+        - Admin Reports
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/startDate'
+        - $ref: '#/components/parameters/endDate'
+      responses:
+        '200':
+          description: Order overview
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OrderOverviewResponse'
+        '401':
+          description: Unauthorized
+        '403':
+          description: Forbidden
+
+  /api/reports/orders/by-status:
+    get:
+      summary: Orders by Status
+      description: Phân bổ đơn hàng theo trạng thái
+      tags:
+        - Admin Reports
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/startDate'
+        - $ref: '#/components/parameters/endDate'
+      responses:
+        '200':
+          description: Orders by status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OrderStatusResponse'
+        '401':
+          description: Unauthorized
+        '403':
+          description: Forbidden
+
+  /api/reports/orders/trends:
+    get:
+      summary: Order Trends
+      description: Xu hướng đơn hàng theo thời gian
+      tags:
+        - Admin Reports
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/startDate'
+        - $ref: '#/components/parameters/endDate'
+        - $ref: '#/components/parameters/granularity'
+      responses:
+        '200':
+          description: Order trends
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OrderTrendResponse'
+        '401':
+          description: Unauthorized
+        '403':
+          description: Forbidden
+
+  /api/reports/orders/payment-methods:
+    get:
+      summary: Payment Method Distribution
+      description: Phân bổ phương thức thanh toán
+      tags:
+        - Admin Reports
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/startDate'
+        - $ref: '#/components/parameters/endDate'
+      responses:
+        '200':
+          description: Payment method distribution
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaymentMethodResponse'
+        '401':
+          description: Unauthorized
+        '403':
+          description: Forbidden
+
+  /api/reports/complaints/overview:
+    get:
+      summary: Complaint Overview
+      description: Tổng quan khiếu nại - total, open, resolved, by status, by category
+      tags:
+        - Admin Reports
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/startDate'
+        - $ref: '#/components/parameters/endDate'
+      responses:
+        '200':
+          description: Complaint overview
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ComplaintOverviewResponse'
+        '401':
+          description: Unauthorized
+        '403':
+          description: Forbidden
+
+  /api/reports/complaints/trends:
+    get:
+      summary: Complaint Trends
+      description: Xu hướng khiếu nại theo thời gian
+      tags:
+        - Admin Reports
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/startDate'
+        - $ref: '#/components/parameters/endDate'
+        - $ref: '#/components/parameters/granularity'
+      responses:
+        '200':
+          description: Complaint trends
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ComplaintTrendResponse'
+        '401':
+          description: Unauthorized
+        '403':
+          description: Forbidden
+
+  /api/reports/complaints/resolution:
+    get:
+      summary: Resolution Statistics
+      description: Thống kê giải quyết - refund types, avg resolution time, by category
+      tags:
+        - Admin Reports
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/startDate'
+        - $ref: '#/components/parameters/endDate'
+      responses:
+        '200':
+          description: Resolution statistics
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ResolutionStatsResponse'
+        '401':
+          description: Unauthorized
+        '403':
+          description: Forbidden
+
+  /api/reports/complaints/sla:
+    get:
+      summary: SLA Compliance
+      description: SLA compliance metrics - first response, resolution time
+      tags:
+        - Admin Reports
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/startDate'
+        - $ref: '#/components/parameters/endDate'
+      responses:
+        '200':
+          description: SLA compliance
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SLAComplianceResponse'
+        '401':
+          description: Unauthorized
+        '403':
+          description: Forbidden
+
+  /api/reports/complaints/moderator-performance:
+    get:
+      summary: Moderator Performance
+      description: Hiệu suất từng moderator - tickets handled, resolution rate, SLA compliance
+      tags:
+        - Admin Reports
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/startDate'
+        - $ref: '#/components/parameters/endDate'
+      responses:
+        '200':
+          description: Moderator performance
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ModeratorPerformanceResponse'
+        '401':
+          description: Unauthorized
+        '403':
+          description: Forbidden
+
+  /api/reports/shops/rankings:
+    get:
+      summary: Shop Rankings
+      description: Xếp hạng shop - top doanh thu, top khiếu nại
+      tags:
+        - Admin Reports
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/startDate'
+        - $ref: '#/components/parameters/endDate'
+        - name: limit
+          in: query
+          description: Số lượng shop tối đa (default 10)
+          schema:
+            type: integer
+            default: 10
+      responses:
+        '200':
+          description: Shop rankings
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ShopRankingResponse'
+        '401':
+          description: Unauthorized
+        '403':
+          description: Forbidden
+
+  /api/reports/products/top-selling:
+    get:
+      summary: Top Selling Products
+      description: Top sản phẩm bán chạy nhất theo số lượng
+      tags:
+        - Admin Reports
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/startDate'
+        - $ref: '#/components/parameters/endDate'
+        - name: limit
+          in: query
+          description: Số lượng sản phẩm tối đa (default 10)
+          schema:
+            type: integer
+            default: 10
+      responses:
+        '200':
+          description: Top selling products
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TopSellingProductsResponse'
+        '401':
+          description: Unauthorized
+        '403':
+          description: Forbidden
+
+  # ==================== SELLER REPORTS ====================
+
+  /api/seller/reports/dashboard:
+    get:
+      summary: Seller Dashboard
+      description: Tổng quan shop - revenue, orders, rating
+      tags:
+        - Seller Reports
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Seller dashboard
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SellerDashboardResponse'
+        '401':
+          description: Unauthorized
+        '403':
+          description: Forbidden - Requires SALES_REPORT_VIEW permission
+        '404':
+          description: Shop not found
+
+  /api/seller/reports/revenue/overview:
+    get:
+      summary: Seller Revenue Overview
+      description: Doanh thu shop - sales, platform fee, net revenue, escrow
+      tags:
+        - Seller Reports
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/startDate'
+        - $ref: '#/components/parameters/endDate'
+      responses:
+        '200':
+          description: Seller revenue overview
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SellerRevenueResponse'
+        '401':
+          description: Unauthorized
+        '403':
+          description: Forbidden
+        '404':
+          description: Shop not found
+
+  /api/seller/reports/revenue/trends:
+    get:
+      summary: Seller Revenue Trends
+      description: Xu hướng doanh thu shop theo thời gian
+      tags:
+        - Seller Reports
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/startDate'
+        - $ref: '#/components/parameters/endDate'
+        - $ref: '#/components/parameters/granularity'
+      responses:
+        '200':
+          description: Seller revenue trends
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SellerRevenueTrendResponse'
+        '401':
+          description: Unauthorized
+        '403':
+          description: Forbidden
+        '404':
+          description: Shop not found
+
+  /api/seller/reports/orders/overview:
+    get:
+      summary: Seller Order Overview
+      description: Tổng quan đơn hàng shop
+      tags:
+        - Seller Reports
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/startDate'
+        - $ref: '#/components/parameters/endDate'
+      responses:
+        '200':
+          description: Seller order overview
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SellerOrderOverviewResponse'
+        '401':
+          description: Unauthorized
+        '403':
+          description: Forbidden
+        '404':
+          description: Shop not found
+
+  /api/seller/reports/orders/by-status:
+    get:
+      summary: Seller Orders by Status
+      description: Đơn hàng shop theo trạng thái
+      tags:
+        - Seller Reports
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/startDate'
+        - $ref: '#/components/parameters/endDate'
+      responses:
+        '200':
+          description: Seller orders by status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SellerOrderStatusResponse'
+        '401':
+          description: Unauthorized
+        '403':
+          description: Forbidden
+        '404':
+          description: Shop not found
+
+  /api/seller/reports/orders/trends:
+    get:
+      summary: Seller Order Trends
+      description: Xu hướng đơn hàng shop theo thời gian
+      tags:
+        - Seller Reports
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/startDate'
+        - $ref: '#/components/parameters/endDate'
+        - $ref: '#/components/parameters/granularity'
+      responses:
+        '200':
+          description: Seller order trends
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SellerOrderTrendResponse'
+        '401':
+          description: Unauthorized
+        '403':
+          description: Forbidden
+        '404':
+          description: Shop not found
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: Enter JWT token
+
+  parameters:
+    startDate:
+      name: startDate
+      in: query
+      description: Ngày bắt đầu (ISO 8601). Mặc định 30 ngày trước.
+      schema:
+        type: string
+        format: date-time
+        example: "2026-01-01T00:00:00.000Z"
+    endDate:
+      name: endDate
+      in: query
+      description: Ngày kết thúc (ISO 8601). Mặc định hôm nay.
+      schema:
+        type: string
+        format: date-time
+        example: "2026-02-19T23:59:59.999Z"
+    granularity:
+      name: granularity
+      in: query
+      description: Độ chi tiết cho trend data
+      schema:
+        type: string
+        enum: [day, week, month]
+        default: day
+
+  schemas:
+    UserProfile:
+      type: object
+      properties:
+        id:
+          type: string
+        email:
+          type: string
+          format: email
+        fullName:
+          type: string
+        phone:
+          type: string
+          nullable: true
+        avatarUrl:
+          type: string
+          nullable: true
+        roleKey:
+          type: string
+        roleName:
+          type: string
+        emailVerified:
+          type: boolean
+        phoneVerified:
+          type: boolean
+        trustLevel:
+          type: number
+        status:
+          type: string
+          enum: [Active, Locked, Banned]
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+
+    UserProfileUpdateRequest:
+      type: object
+      properties:
+        fullName:
+          type: string
+          minLength: 2
+        phone:
+          type: string
+          nullable: true
+        avatarUrl:
+          type: string
+          nullable: true
+
+    User:
+      type: object
+      properties:
+        id:
+          type: string
+        email:
+          type: string
+          format: email
+        fullName:
+          type: string
+        roleKey:
+          type: string
+        status:
+          type: string
+          enum: [Active, Locked, Banned]
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+
+    Shop:
+      type: object
+      properties:
+        _id:
+          type: string
+        ownerUserId:
+          type: string
+        shopName:
+          type: string
+        description:
+          type: string
+          nullable: true
+        status:
+          type: string
+          enum: [Pending, Active, Suspended, Closed]
+        approvedByUserId:
+          type: string
+          nullable: true
+        approvedAt:
+          type: string
+          format: date-time
+          nullable: true
+        moderatorNote:
+          type: string
+          nullable: true
+        ratingAvg:
+          type: number
+        totalSales:
+          type: number
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+
+    ShopResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        message:
+          type: string
+        data:
+          $ref: '#/components/schemas/Shop'
+
+    Product:
+      type: object
+      properties:
+        _id:
+          type: string
+        shopId:
+          type: string
+        platformId:
+          type: string
+        title:
+          type: string
+        description:
+          type: string
+        warrantyPolicy:
+          type: string
+        howToUse:
+          type: string
+        thumbnailUrl:
+          type: string
+          nullable: true
+        planType:
+          type: string
+          enum: [Personal, Family, Slot, Shared, InviteLink]
+        durationDays:
+          type: integer
+        price:
+          type: number
+        status:
+          type: string
+          enum: [Approved, Hidden, Rejected, Pending]
+        approvedByUserId:
+          type: string
+          nullable: true
+        approvedAt:
+          type: string
+          format: date-time
+          nullable: true
+        rejectionReason:
+          type: string
+          nullable: true
+        isDeleted:
+          type: boolean
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+
+    ProductCreateRequest:
+      type: object
+      required:
+        - shopId
+        - platformId
+        - title
+        - description
+        - warrantyPolicy
+        - howToUse
+        - planType
+        - durationDays
+        - price
+      properties:
+        shopId:
+          type: string
+        platformId:
+          type: string
+        title:
+          type: string
+        description:
+          type: string
+        warrantyPolicy:
+          type: string
+        howToUse:
+          type: string
+        thumbnailUrl:
+          type: string
+          nullable: true
+        planType:
+          type: string
+          enum: [Personal, Family, Slot, Shared, InviteLink]
+        durationDays:
+          type: integer
+        price:
+          type: number
+
+    ProductUpdateRequest:
+      type: object
+      properties:
+        title:
+          type: string
+        description:
+          type: string
+        warrantyPolicy:
+          type: string
+        howToUse:
+          type: string
+        thumbnailUrl:
+          type: string
+          nullable: true
+        planType:
+          type: string
+          enum: [Personal, Family, Slot, Shared, InviteLink]
+        durationDays:
+          type: integer
+        price:
+          type: number
+
+    SellerOrderItemCustomer:
+      type: object
+      properties:
+        id:
+          type: string
+        email:
+          type: string
+        fullName:
+          type: string
+
+    SellerOrderItemProduct:
+      type: object
+      properties:
+        id:
+          type: string
+        title:
+          type: string
+        planType:
+          type: string
+          enum: [Personal, Family, Slot, Shared, InviteLink]
+        durationDays:
+          type: integer
+        thumbnailUrl:
+          type: string
+          nullable: true
+
+    # Order Schemas
+    CreateOrderRequest:
+      type: object
+      required:
+        - items
+      properties:
+        items:
+          type: array
+          minItems: 1
+          items:
+            type: object
+            required:
+              - productId
+              - quantity
+            properties:
+              productId:
+                type: string
+                description: Product MongoDB ObjectId
+              quantity:
+                type: integer
+                minimum: 1
+                description: Quantity to order
+        paymentMethod:
+          type: string
+          enum: [Wallet, Momo, Vnpay, Zalopay]
+          default: Wallet
+          description: Payment method to use
+
+    CreateOrderResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        message:
+          type: string
+        data:
+          type: object
+          properties:
+            order:
+              $ref: '#/components/schemas/OrderBasic'
+            items:
+              type: array
+              items:
+                $ref: '#/components/schemas/OrderItemBasic'
+
+    OrderBasic:
+      type: object
+      properties:
+        _id:
+          type: string
+        orderCode:
+          type: string
+        totalAmount:
+          type: number
+          description: Total amount in VND
+        feeAmount:
+          type: number
+          description: Platform fee in VND
+        payableAmount:
+          type: number
+          description: Total payable amount in VND
+        status:
+          type: string
+          enum: [PendingPayment, Paid, Completed, Cancelled, Disputed, Refunded]
+        paymentProvider:
+          type: string
+          enum: [Wallet, Momo, Vnpay, Zalopay]
+          nullable: true
+        paidAt:
+          type: string
+          format: date-time
+          nullable: true
+        createdAt:
+          type: string
+          format: date-time
+
+    OrderItemBasic:
+      type: object
+      properties:
+        _id:
+          type: string
+        productId:
+          type: string
+        shopId:
+          type: string
+        quantity:
+          type: integer
+        unitPrice:
+          type: number
+        subtotal:
+          type: number
+        itemStatus:
+          type: string
+          enum: [WaitingDelivery, Delivered, Completed, Disputed, Refunded]
+
+    MyOrdersResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/OrderWithItems'
+
+    OrderWithItems:
+      type: object
+      properties:
+        order:
+          $ref: '#/components/schemas/OrderFull'
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/OrderItemFull'
+
+    OrderFull:
+      type: object
+      properties:
+        _id:
+          type: string
+        orderCode:
+          type: string
+        customerUserId:
+          oneOf:
+            - type: string
+            - $ref: '#/components/schemas/UserBasic'
+        totalAmount:
+          type: number
+        feeAmount:
+          type: number
+        payableAmount:
+          type: number
+        status:
+          type: string
+          enum: [PendingPayment, Paid, Completed, Cancelled, Disputed, Refunded]
+        paymentProvider:
+          type: string
+          enum: [Wallet, Momo, Vnpay, Zalopay]
+          nullable: true
+        providerTxnId:
+          type: string
+          nullable: true
+        paidAt:
+          type: string
+          format: date-time
+          nullable: true
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+
+    OrderItemFull:
+      type: object
+      properties:
+        _id:
+          type: string
+        orderId:
+          type: string
+        shopId:
+          oneOf:
+            - type: string
+            - $ref: '#/components/schemas/ShopBasic'
+        productId:
+          oneOf:
+            - type: string
+            - $ref: '#/components/schemas/ProductBasic'
+        inventoryItemId:
+          type: string
+          nullable: true
+        quantity:
+          type: integer
+        unitPrice:
+          type: number
+        subtotal:
+          type: number
+        itemStatus:
+          type: string
+          enum: [WaitingDelivery, Delivered, Completed, Disputed, Refunded]
+        safeUntil:
+          type: string
+          format: date-time
+        holdAmount:
+          type: number
+        holdStatus:
+          type: string
+          enum: [Holding, Released, Refunded]
+        holdAt:
+          type: string
+          format: date-time
+        releaseAt:
+          type: string
+          format: date-time
+          nullable: true
+        deliveryMethod:
+          type: string
+          enum: [Account, InviteLink, Code, QR]
+          nullable: true
+        deliveryContent:
+          type: string
+          nullable: true
+          description: Full delivery content (decrypted for customer)
+        deliveryContentMasked:
+          type: string
+          nullable: true
+          description: Masked version for display
+        evidenceNote:
+          type: string
+          nullable: true
+        deliveredAt:
+          type: string
+          format: date-time
+          nullable: true
+        createdAt:
+          type: string
+          format: date-time
+
+    OrderDetailResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        data:
+          type: object
+          properties:
+            order:
+              $ref: '#/components/schemas/OrderFull'
+            items:
+              type: array
+              items:
+                $ref: '#/components/schemas/OrderItemFull'
+
+    ConfirmDeliveryResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        message:
+          type: string
+        data:
+          type: object
+          properties:
+            _id:
+              type: string
+            itemStatus:
+              type: string
+              enum: [Completed]
+
+    SellerOrderItem:
+      type: object
+      properties:
+        id:
+          type: string
+        orderCode:
+          type: string
+        orderCreatedAt:
+          type: string
+          format: date-time
+          nullable: true
+        customer:
+          $ref: '#/components/schemas/SellerOrderItemCustomer'
+        product:
+          $ref: '#/components/schemas/SellerOrderItemProduct'
+        quantity:
+          type: integer
+        unitPrice:
+          type: number
+        subtotal:
+          type: number
+        itemStatus:
+          type: string
+        holdStatus:
+          type: string
+        holdAmount:
+          type: number
+        deliveredAt:
+          type: string
+          format: date-time
+          nullable: true
+        createdAt:
+          type: string
+          format: date-time
+        credential:
+          type: string
+          nullable: true
+
+    SellerOrderItemsResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        data:
+          type: object
+          properties:
+            items:
+              type: array
+              items:
+                $ref: '#/components/schemas/SellerOrderItem'
+            pagination:
+              type: object
+              properties:
+                total:
+                  type: integer
+                limit:
+                  type: integer
+                skip:
+                  type: integer
+
+    # Support Schemas
+    Conversation:
+      type: object
+      properties:
+        _id:
+          type: string
+        type:
+          type: string
+          enum: [OrderItem, Shop, Support]
+        customerUserId:
+          oneOf:
+            - type: string
+            - $ref: '#/components/schemas/UserBasic'
+        sellerUserId:
+          oneOf:
+            - type: string
+            - $ref: '#/components/schemas/UserBasic'
+          nullable: true
+        staffUserId:
+          oneOf:
+            - type: string
+            - $ref: '#/components/schemas/UserBasic'
+          nullable: true
+        shopId:
+          oneOf:
+            - type: string
+            - $ref: '#/components/schemas/ShopBasic'
+          nullable: true
+        orderItemId:
+          type: string
+          nullable: true
+        ticketId:
+          oneOf:
+            - type: string
+            - $ref: '#/components/schemas/TicketBasic'
+          nullable: true
+        status:
+          type: string
+          enum: [Open, Closed, Blocked]
+        lastMessageAt:
+          type: string
+          format: date-time
+          nullable: true
+        lastMessagePreview:
+          type: string
+          nullable: true
+        unreadCount:
+          type: object
+          additionalProperties:
+            type: integer
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+
+    UserBasic:
+      type: object
+      properties:
+        _id:
+          type: string
+        fullName:
+          type: string
+        email:
+          type: string
+        avatar:
+          type: string
+          nullable: true
+
+    ShopBasic:
+      type: object
+      properties:
+        _id:
+          type: string
+        name:
+          type: string
+        logo:
+          type: string
+          nullable: true
+
+    ProductBasic:
+      type: object
+      properties:
+        _id:
+          type: string
+        title:
+          type: string
+        thumbnailUrl:
+          type: string
+          nullable: true
+        price:
+          type: number
+        planType:
+          type: string
+          enum: [Personal, Family, Slot, Shared, InviteLink]
+
+    TicketBasic:
+      type: object
+      properties:
+        _id:
+          type: string
+        ticketCode:
+          type: string
+        title:
+          type: string
+        status:
+          type: string
+        priority:
+          type: string
+
+    CreateConversationRequest:
+      type: object
+      required:
+        - type
+      properties:
+        type:
+          type: string
+          enum: [OrderItem, Shop]
+        shopId:
+          type: string
+          description: Required for Shop type
+        orderItemId:
+          type: string
+          description: Required for OrderItem type
+
+    ConversationResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        data:
+          $ref: '#/components/schemas/Conversation'
+
+    ConversationsResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        data:
+          type: object
+          properties:
+            conversations:
+              type: array
+              items:
+                $ref: '#/components/schemas/Conversation'
+            total:
+              type: integer
+            page:
+              type: integer
+            totalPages:
+              type: integer
+
+    Message:
+      type: object
+      properties:
+        _id:
+          type: string
+        conversationId:
+          type: string
+        senderUserId:
+          oneOf:
+            - type: string
+            - $ref: '#/components/schemas/UserBasic'
+        messageType:
+          type: string
+          enum: [Text, System, Attachment]
+        body:
+          type: string
+          nullable: true
+        attachments:
+          type: array
+          items:
+            $ref: '#/components/schemas/MessageAttachment'
+        isInternal:
+          type: boolean
+          description: Internal note visible only to staff
+        sentAt:
+          type: string
+          format: date-time
+        readAt:
+          type: string
+          format: date-time
+          nullable: true
+        readBy:
+          type: array
+          items:
+            type: string
+        isDeleted:
+          type: boolean
+
+    MessageAttachment:
+      type: object
+      properties:
+        url:
+          type: string
+        type:
+          type: string
+        fileName:
+          type: string
+        fileSize:
+          type: integer
+
+    SendMessageRequest:
+      type: object
+      required:
+        - conversationId
+        - messageType
+      properties:
+        conversationId:
+          type: string
+        messageType:
+          type: string
+          enum: [Text, Attachment]
+        body:
+          type: string
+        attachments:
+          type: array
+          items:
+            $ref: '#/components/schemas/MessageAttachment'
+        isInternal:
+          type: boolean
+          description: Mark as internal note (staff only)
+
+    MessageResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        data:
+          $ref: '#/components/schemas/Message'
+
+    MessagesResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        data:
+          type: object
+          properties:
+            messages:
+              type: array
+              items:
+                $ref: '#/components/schemas/Message'
+            total:
+              type: integer
+            hasMore:
+              type: boolean
+
+    Ticket:
+      type: object
+      properties:
+        _id:
+          type: string
+        ticketCode:
+          type: string
+          description: Auto-generated ticket code (e.g., TK250204001)
+        customerUserId:
+          oneOf:
+            - type: string
+            - $ref: '#/components/schemas/UserBasic'
+        orderItemId:
+          type: string
+        title:
+          type: string
+        content:
+          type: string
+        type:
+          type: string
+          enum: [Complaint, Dispute, General]
+        priority:
+          type: string
+          enum: [Low, Medium, High, Urgent]
+        status:
+          type: string
+          enum: [Open, InReview, NeedMoreInfo, Resolved, Closed]
+        assignedToUserId:
+          oneOf:
+            - type: string
+            - $ref: '#/components/schemas/UserBasic'
+          nullable: true
+        resolutionType:
+          type: string
+          enum: [None, FullRefund, PartialRefund, Replacement, NoAction]
+        refundAmount:
+          type: number
+          nullable: true
+        decidedByUserId:
+          oneOf:
+            - type: string
+            - $ref: '#/components/schemas/UserBasic'
+          nullable: true
+        decisionNote:
+          type: string
+          nullable: true
+        decidedAt:
+          type: string
+          format: date-time
+          nullable: true
+        escalatedAt:
+          type: string
+          format: date-time
+          nullable: true
+        escalatedByUserId:
+          type: string
+          nullable: true
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+
+    CreateTicketRequest:
+      type: object
+      required:
+        - orderItemId
+        - title
+        - content
+      properties:
+        orderItemId:
+          type: string
+        title:
+          type: string
+          minLength: 5
+          maxLength: 200
+        content:
+          type: string
+          minLength: 10
+          maxLength: 2000
+        type:
+          type: string
+          enum: [Complaint, Dispute, General]
+          default: General
+        priority:
+          type: string
+          enum: [Low, Medium, High]
+          default: Medium
+
+    UpdateTicketRequest:
+      type: object
+      properties:
+        status:
+          type: string
+          enum: [Open, InReview, NeedMoreInfo, Resolved, Closed]
+        priority:
+          type: string
+          enum: [Low, Medium, High, Urgent]
+        assignedToUserId:
+          type: string
+        resolutionType:
+          type: string
+          enum: [None, FullRefund, PartialRefund, Replacement, NoAction]
+        refundAmount:
+          type: number
+        decisionNote:
+          type: string
+
+    TicketResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        data:
+          $ref: '#/components/schemas/Ticket'
+
+    TicketsResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        data:
+          type: object
+          properties:
+            tickets:
+              type: array
+              items:
+                $ref: '#/components/schemas/Ticket'
+            total:
+              type: integer
+            page:
+              type: integer
+            totalPages:
+              type: integer
+
+    TicketStats:
+      type: object
+      properties:
+        total:
+          type: integer
+        byStatus:
+          type: object
+          additionalProperties:
+            type: integer
+        byPriority:
+          type: object
+          additionalProperties:
+            type: integer
+        avgResolutionTime:
+          type: number
+          description: Average resolution time in hours
+
+    # ===== COMPLAINT SCHEMAS =====
+
+    ComplaintCategory:
+      type: string
+      enum:
+        - ProductQuality
+        - NotAsDescribed
+        - MissingWrongItems
+        - DeliveryIssues
+        - AccountNotWorking
+        - SellerNotResponding
+        - RefundDispute
+      description: |
+        Loại khiếu nại:
+        - ProductQuality: Chất lượng sản phẩm
+        - NotAsDescribed: Không đúng mô tả
+        - MissingWrongItems: Thiếu/sai hàng
+        - DeliveryIssues: Vấn đề giao hàng
+        - AccountNotWorking: Tài khoản không hoạt động
+        - SellerNotResponding: Người bán không phản hồi
+        - RefundDispute: Tranh chấp hoàn tiền
+
+    ComplaintSubcategory:
+      type: string
+      enum:
+        - ItemDefective
+        - ItemDamaged
+        - DifferentFromPhoto
+        - DifferentSpecifications
+        - MissingItems
+        - WrongItems
+        - NeverDelivered
+        - PartialDelivery
+        - CredentialsInvalid
+        - AccountExpired
+        - AccountAlreadyUsed
+        - NoResponse48h
+        - RefuseRefund
+        - PartialRefundDispute
+
+    EvidenceType:
+      type: string
+      enum: [Image, Video, Screenshot, Document]
+
+    ResolutionType:
+      type: string
+      enum: [None, FullRefund, PartialRefund, Replace, Reject]
+
+    PenaltyType:
+      type: string
+      enum: [Warning, TemporarySuspension, PermanentSuspension, Fine]
+
+    ComplaintEvidence:
+      type: object
+      properties:
+        type:
+          $ref: '#/components/schemas/EvidenceType'
+        url:
+          type: string
+          format: uri
+        description:
+          type: string
+          maxLength: 500
+        uploadedAt:
+          type: string
+          format: date-time
+
+    InternalNote:
+      type: object
+      properties:
+        authorUserId:
+          type: string
+        content:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+
+    SellerPenalty:
+      type: object
+      properties:
+        type:
+          $ref: '#/components/schemas/PenaltyType'
+        reason:
+          type: string
+        duration:
+          type: integer
+          description: Thời gian (ngày)
+        amount:
+          type: number
+          description: Số tiền phạt (VND)
+        issuedAt:
+          type: string
+          format: date-time
+        issuedByUserId:
+          type: string
+
+    Complaint:
+      type: object
+      properties:
+        _id:
+          type: string
+        ticketCode:
+          type: string
+          description: Mã khiếu nại tự động (e.g., TK250212001)
+        customerUserId:
+          oneOf:
+            - type: string
+            - $ref: '#/components/schemas/UserBasic'
+        sellerUserId:
+          oneOf:
+            - type: string
+            - $ref: '#/components/schemas/UserBasic'
+        shopId:
+          oneOf:
+            - type: string
+            - $ref: '#/components/schemas/ShopBasic'
+        orderItemId:
+          type: string
+        category:
+          $ref: '#/components/schemas/ComplaintCategory'
+        subcategory:
+          $ref: '#/components/schemas/ComplaintSubcategory'
+        title:
+          type: string
+        content:
+          type: string
+        status:
+          type: string
+          enum:
+            - ModeratorAssigned
+            - InReview
+            - NeedMoreInfo
+            - DecisionMade
+            - Appealable
+            - AppealFiled
+            - AppealReview
+            - Resolved
+            - Closed
+        priority:
+          type: string
+          enum: [Low, Medium, High, Urgent]
+        escalationLevel:
+          type: string
+          enum: [Level2_Moderator, Level3_SeniorMod, Level4_Admin]
+        buyerEvidence:
+          type: array
+          items:
+            $ref: '#/components/schemas/ComplaintEvidence'
+        assignedToUserId:
+          oneOf:
+            - type: string
+            - $ref: '#/components/schemas/UserBasic'
+          nullable: true
+        resolutionType:
+          $ref: '#/components/schemas/ResolutionType'
+        refundAmount:
+          type: number
+          nullable: true
+        decisionNote:
+          type: string
+          nullable: true
+        decidedByUserId:
+          type: string
+          nullable: true
+        decidedAt:
+          type: string
+          format: date-time
+          nullable: true
+        isAppeal:
+          type: boolean
+        originalTicketId:
+          type: string
+          nullable: true
+        appealDeadline:
+          type: string
+          format: date-time
+          nullable: true
+        orderValue:
+          type: number
+        isHighValue:
+          type: boolean
+        calculatedPriority:
+          type: number
+        slaBreached:
+          type: boolean
+        firstResponseAt:
+          type: string
+          format: date-time
+          nullable: true
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+
+    ComplaintQueueItem:
+      type: object
+      properties:
+        _id:
+          type: string
+        ticketId:
+          oneOf:
+            - type: string
+            - $ref: '#/components/schemas/Complaint'
+        assignedModeratorId:
+          oneOf:
+            - type: string
+            - $ref: '#/components/schemas/UserBasic'
+          nullable: true
+        queuePriority:
+          type: number
+          description: Điểm ưu tiên (0-100)
+        status:
+          type: string
+          enum: [InQueue, Assigned, InProgress, Completed]
+        addedToQueueAt:
+          type: string
+          format: date-time
+        pickedUpAt:
+          type: string
+          format: date-time
+          nullable: true
+        completedAt:
+          type: string
+          format: date-time
+          nullable: true
+        orderValue:
+          type: number
+        buyerTrustLevel:
+          type: number
+        sellerTrustLevel:
+          type: number
+        ticketAge:
+          type: number
+          description: Tuổi ticket (giờ)
+        isHighValue:
+          type: boolean
+        isEscalated:
+          type: boolean
+
+    ComplaintTimelineEvent:
+      type: object
+      properties:
+        _id:
+          type: string
+        ticketId:
+          type: string
+        eventType:
+          type: string
+          enum:
+            - Created
+            - SellerNotified
+            - SellerResponded
+            - SellerTimeout
+            - EvidenceAdded
+            - BuyerAccepted
+            - BuyerRejected
+            - Escalated
+            - AutoEscalated
+            - AssignedToModerator
+            - InternalNoteAdded
+            - InfoRequested
+            - InfoProvided
+            - DecisionMade
+            - AppealFiled
+            - AppealDecisionMade
+            - Resolved
+            - Closed
+            - StatusChanged
+            - PriorityChanged
+        actorUserId:
+          oneOf:
+            - type: string
+            - $ref: '#/components/schemas/UserBasic'
+        actorRole:
+          type: string
+          enum: [BUYER, SELLER, MODERATOR, ADMIN, SYSTEM]
+        description:
+          type: string
+        metadata:
+          type: object
+          additionalProperties: true
+        createdAt:
+          type: string
+          format: date-time
+
+    # Request Schemas
+    CreateComplaintRequest:
+      type: object
+      required:
+        - orderItemId
+        - category
+        - title
+        - content
+      properties:
+        orderItemId:
+          type: string
+        category:
+          $ref: '#/components/schemas/ComplaintCategory'
+        subcategory:
+          $ref: '#/components/schemas/ComplaintSubcategory'
+        title:
+          type: string
+          minLength: 10
+          maxLength: 200
+          example: Tài khoản không đăng nhập được
+        content:
+          type: string
+          minLength: 20
+          maxLength: 2000
+          example: Tôi đã mua tài khoản nhưng khi đăng nhập thì báo lỗi sai mật khẩu...
+        evidence:
+          type: array
+          maxItems: 10
+          items:
+            type: object
+            properties:
+              type:
+                $ref: '#/components/schemas/EvidenceType'
+              url:
+                type: string
+                format: uri
+              description:
+                type: string
+                maxLength: 500
+
+    AddEvidenceRequest:
+      type: object
+      required:
+        - type
+        - url
+      properties:
+        type:
+          $ref: '#/components/schemas/EvidenceType'
+        url:
+          type: string
+          format: uri
+          example: https://storage.example.com/evidence/screenshot.png
+        description:
+          type: string
+          maxLength: 500
+          example: Ảnh chụp màn hình lỗi đăng nhập
+
+    AddInternalNoteRequest:
+      type: object
+      required:
+        - content
+      properties:
+        content:
+          type: string
+          minLength: 1
+          maxLength: 2000
+          example: Đã liên hệ với người bán qua email, chờ xác nhận
+
+    RequestInfoRequest:
+      type: object
+      required:
+        - targetParty
+        - questions
+      properties:
+        targetParty:
+          type: string
+          enum: [buyer, seller, both]
+        questions:
+          type: array
+          minItems: 1
+          maxItems: 5
+          items:
+            type: string
+            minLength: 10
+            maxLength: 500
+          example:
+            - Bạn có thể cung cấp video khi đăng nhập vào tài khoản không?
+            - Bạn đã thử đổi mật khẩu chưa?
+
+    MakeDecisionRequest:
+      type: object
+      required:
+        - resolutionType
+        - decisionNote
+      properties:
+        resolutionType:
+          $ref: '#/components/schemas/ResolutionType'
+        decisionNote:
+          type: string
+          minLength: 20
+          maxLength: 2000
+          example: Sau khi xem xét bằng chứng từ cả hai bên, quyết định hoàn tiền toàn bộ cho người mua
+        templateId:
+          type: string
+          description: ID của mẫu quyết định (nếu sử dụng)
+        refundAmount:
+          type: number
+          minimum: 0
+          description: Số tiền hoàn (bắt buộc nếu resolutionType là PartialRefund)
+        sellerPenalty:
+          type: object
+          properties:
+            type:
+              $ref: '#/components/schemas/PenaltyType'
+            reason:
+              type: string
+              minLength: 10
+              maxLength: 500
+            duration:
+              type: integer
+              minimum: 1
+              maximum: 365
+              description: Thời gian (ngày)
+            amount:
+              type: number
+              minimum: 0
+              description: Số tiền phạt (VND)
+
+    FileAppealRequest:
+      type: object
+      required:
+        - reason
+      properties:
+        reason:
+          type: string
+          minLength: 20
+          maxLength: 2000
+          example: Tôi không đồng ý với quyết định vì người bán đã không cung cấp đúng sản phẩm như mô tả
+        additionalEvidence:
+          type: array
+          maxItems: 5
+          items:
+            type: object
+            properties:
+              type:
+                $ref: '#/components/schemas/EvidenceType'
+              url:
+                type: string
+                format: uri
+              description:
+                type: string
+                maxLength: 500
+
+    AppealDecisionRequest:
+      type: object
+      required:
+        - decision
+        - reason
+      properties:
+        decision:
+          type: string
+          enum: [Upheld, Overturned]
+          description: |
+            - Upheld: Giữ nguyên quyết định ban đầu
+            - Overturned: Đảo ngược quyết định
+        newResolutionType:
+          $ref: '#/components/schemas/ResolutionType'
+        newRefundAmount:
+          type: number
+          minimum: 0
+        reason:
+          type: string
+          minLength: 20
+          maxLength: 2000
+          example: Sau khi xem xét kháng cáo và bằng chứng bổ sung, quyết định đảo ngược và hoàn tiền toàn bộ
+
+    # Response Schemas
+    ComplaintResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        message:
+          type: string
+        data:
+          $ref: '#/components/schemas/Complaint'
+
+    ComplaintsListResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/Complaint'
+        pagination:
+          type: object
+          properties:
+            total:
+              type: integer
+            limit:
+              type: integer
+            skip:
+              type: integer
+
+    ComplaintQueueResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/ComplaintQueueItem'
+        pagination:
+          type: object
+          properties:
+            total:
+              type: integer
+            limit:
+              type: integer
+            skip:
+              type: integer
+
+    QueueStatsResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        data:
+          type: object
+          properties:
+            totalInQueue:
+              type: integer
+              description: Số khiếu nại trong hàng đợi
+            totalAssigned:
+              type: integer
+              description: Số khiếu nại đã được gán
+            totalInProgress:
+              type: integer
+              description: Số khiếu nại đang xử lý
+            totalCompletedToday:
+              type: integer
+              description: Số khiếu nại hoàn thành hôm nay
+            avgWaitTimeMinutes:
+              type: number
+              description: Thời gian chờ trung bình (phút)
+            highValueCount:
+              type: integer
+              description: Số khiếu nại giá trị cao trong hàng đợi
+
+    ModeratorWorkloadResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        data:
+          type: array
+          items:
+            type: object
+            properties:
+              moderatorId:
+                type: string
+              moderatorName:
+                type: string
+              assignedCount:
+                type: integer
+                description: Số khiếu nại được gán
+              inProgressCount:
+                type: integer
+                description: Số khiếu nại đang xử lý
+              completedTodayCount:
+                type: integer
+                description: Số khiếu nại hoàn thành hôm nay
+
+    ComplaintTimelineResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/ComplaintTimelineEvent'
+
+    # ==================== ORDER CANCEL & ESCROW SCHEMAS ====================
+
+    CancelOrderRequest:
+      type: object
+      required:
+        - reason
+      properties:
+        reason:
+          type: string
+          minLength: 1
+          maxLength: 500
+          example: Sản phẩm hết hàng, không thể giao
+
+    CancelOrderResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        message:
+          type: string
+          example: Đơn hàng đã được hủy thành công
+        data:
+          type: object
+          properties:
+            orderId:
+              type: string
+            orderCode:
+              type: string
+            status:
+              type: string
+              enum: [Cancelled]
+            refundedAmount:
+              type: number
+              description: Số tiền đã hoàn lại cho buyer (nếu có)
+            refundedAt:
+              type: string
+              format: date-time
+
+    EscrowStatusResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        data:
+          type: object
+          properties:
+            orderId:
+              type: string
+            orderCode:
+              type: string
+            totalHoldAmount:
+              type: number
+              description: Tổng số tiền đang giữ (VND)
+            items:
+              type: array
+              items:
+                $ref: '#/components/schemas/EscrowItemStatus'
+            summary:
+              type: object
+              properties:
+                holding:
+                  type: number
+                  description: Tổng tiền đang giữ (VND)
+                released:
+                  type: number
+                  description: Tổng tiền đã release (VND)
+                refunded:
+                  type: number
+                  description: Tổng tiền đã hoàn (VND)
+
+    EscrowItemStatus:
+      type: object
+      properties:
+        orderItemId:
+          type: string
+        productTitle:
+          type: string
+        inventoryCode:
+          type: string
+        holdAmount:
+          type: number
+          description: Số tiền giữ (VND)
+        holdStatus:
+          type: string
+          enum: [Holding, Released, Refunded]
+        holdAt:
+          type: string
+          format: date-time
+        releaseAt:
+          type: string
+          format: date-time
+          nullable: true
+        timeRemainingSeconds:
+          type: integer
+          description: Thời gian còn lại trước khi auto-release (giây), null nếu đã release
+          nullable: true
+        canComplaint:
+          type: boolean
+          description: Có thể tạo khiếu nại không
+        complaintDeadline:
+          type: string
+          format: date-time
+          description: Hạn cuối tạo khiếu nại
+
+    # ==================== DISBURSEMENT SCHEMAS ====================
+
+    HoldingItemsResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        data:
+          type: object
+          properties:
+            items:
+              type: array
+              items:
+                $ref: '#/components/schemas/HoldingItem'
+            pagination:
+              type: object
+              properties:
+                total:
+                  type: integer
+                limit:
+                  type: integer
+                skip:
+                  type: integer
+            summary:
+              type: object
+              properties:
+                totalHolding:
+                  type: integer
+                  description: Tổng số item đang giữ
+                readyForDisbursement:
+                  type: integer
+                  description: Số item sẵn sàng giải ngân (>72h)
+                withComplaints:
+                  type: integer
+                  description: Số item có khiếu nại đang mở
+
+    HoldingItem:
+      type: object
+      properties:
+        orderItemId:
+          type: string
+        orderCode:
+          type: string
+        customerEmail:
+          type: string
+        customerName:
+          type: string
+        shopName:
+          type: string
+        shopId:
+          type: string
+        productTitle:
+          type: string
+        inventorySku:
+          type: string
+        itemStatus:
+          type: string
+          enum: [Paid, Delivered, Completed]
+        holdAmount:
+          type: number
+          description: Số tiền giữ (VND)
+        holdAt:
+          type: string
+          format: date-time
+        hoursHeld:
+          type: integer
+          description: Số giờ đã giữ tiền
+        timeRemainingSeconds:
+          type: integer
+          description: Thời gian còn lại trước khi sẵn sàng giải ngân (giây)
+        timeRemainingFormatted:
+          type: string
+          description: Thời gian còn lại dạng đọc được (e.g. "48h 30m" hoặc "Ready")
+          example: "48h 30m"
+        isReadyForDisbursement:
+          type: boolean
+          description: Đã qua 72h chưa
+        hasOpenComplaint:
+          type: boolean
+          description: Có khiếu nại đang mở không
+        canDisburse:
+          type: boolean
+          description: Có thể giải ngân không (>72h và không có complaint)
+
+    DisbursementProcessResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        message:
+          type: string
+          example: Processed 15 items
+        data:
+          type: object
+          properties:
+            processed:
+              type: integer
+              description: Số item đã xử lý
+            succeeded:
+              type: integer
+              description: Số item thành công
+            failed:
+              type: integer
+              description: Số item thất bại
+            errors:
+              type: array
+              description: Danh sách lỗi (tối đa 10)
+              items:
+                type: string
+
+    PendingDisbursementsResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        data:
+          type: object
+          properties:
+            items:
+              type: array
+              items:
+                $ref: '#/components/schemas/PendingDisbursementItem'
+            pagination:
+              type: object
+              properties:
+                total:
+                  type: integer
+                limit:
+                  type: integer
+                skip:
+                  type: integer
+
+    PendingDisbursementItem:
+      type: object
+      properties:
+        orderItemId:
+          type: string
+        orderCode:
+          type: string
+        customerEmail:
+          type: string
+        customerName:
+          type: string
+        shopName:
+          type: string
+        productTitle:
+          type: string
+        holdAmount:
+          type: number
+          description: Số tiền giữ (VND)
+        holdAt:
+          type: string
+          format: date-time
+        hoursHeld:
+          type: integer
+          description: Số giờ đã giữ tiền
+        hasOpenComplaint:
+          type: boolean
+          description: Có khiếu nại đang mở không
+        canDisburse:
+          type: boolean
+          description: Có thể giải ngân không (false nếu có complaint)
+
+    DisbursementTriggerResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        message:
+          type: string
+          example: Giải ngân thành công 950,000 VND cho shop (đã trừ phí 5%)
+
+    DisbursementStatsResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        data:
+          type: object
+          properties:
+            holding:
+              type: object
+              properties:
+                count:
+                  type: integer
+                  description: Số item đang giữ
+                totalAmount:
+                  type: number
+                  description: Tổng tiền đang giữ (VND)
+            releasedLast30Days:
+              type: object
+              properties:
+                count:
+                  type: integer
+                  description: Số item đã release trong 30 ngày
+                totalAmount:
+                  type: number
+                  description: Tổng tiền đã release (VND)
+            refundedLast30Days:
+              type: object
+              properties:
+                count:
+                  type: integer
+                  description: Số item đã hoàn trong 30 ngày
+                totalAmount:
+                  type: number
+                  description: Tổng tiền đã hoàn (VND)
+            readyForDisbursement:
+              type: integer
+              description: Số item sẵn sàng giải ngân (quá 72h)
+            escrowPeriodHours:
+              type: integer
+              description: Thời gian giữ tiền (giờ)
+              example: 72
+
+    # ==================== ADMIN REPORT SCHEMAS ====================
+
+    AdminDashboardResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        data:
+          type: object
+          properties:
+            snapshot:
+              type: object
+              properties:
+                timestamp:
+                  type: string
+                  format: date-time
+            revenue:
+              type: object
+              properties:
+                todayRevenue:
+                  type: number
+                  description: Doanh thu hôm nay (VND)
+                weekRevenue:
+                  type: number
+                  description: Doanh thu tuần này (VND)
+                monthRevenue:
+                  type: number
+                  description: Doanh thu tháng này (VND)
+                platformFeeToday:
+                  type: number
+                  description: Platform fee hôm nay (VND)
+            orders:
+              type: object
+              properties:
+                todayOrders:
+                  type: integer
+                  description: Số đơn hàng hôm nay
+                pendingOrders:
+                  type: integer
+                  description: Số đơn chờ thanh toán
+                disputedOrders:
+                  type: integer
+                  description: Số đơn đang tranh chấp
+            complaints:
+              type: object
+              properties:
+                openTickets:
+                  type: integer
+                  description: Số ticket đang mở
+                urgentTickets:
+                  type: integer
+                  description: Số ticket urgent
+                avgResolutionHours:
+                  type: number
+                  description: Thời gian giải quyết trung bình (giờ)
+                slaBreachedToday:
+                  type: integer
+                  description: Số SLA vi phạm hôm nay
+            escrow:
+              type: object
+              properties:
+                totalHolding:
+                  type: number
+                  description: Tổng tiền đang giữ (VND)
+                readyForDisbursement:
+                  type: integer
+                  description: Số item sẵn sàng giải ngân
+                withComplaints:
+                  type: integer
+                  description: Số item có khiếu nại
+
+    RevenueOverviewResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        data:
+          type: object
+          properties:
+            period:
+              $ref: '#/components/schemas/DatePeriod'
+            totalRevenue:
+              type: number
+              description: Tổng doanh thu (VND)
+            platformFeeCollected:
+              type: number
+              description: Platform fee đã thu (VND)
+            sellerPayouts:
+              type: number
+              description: Đã trả cho seller (VND)
+            pendingInEscrow:
+              type: number
+              description: Đang giữ trong escrow (VND)
+            refundedAmount:
+              type: number
+              description: Đã hoàn tiền (VND)
+
+    PlatformFeeResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        data:
+          type: object
+          properties:
+            period:
+              $ref: '#/components/schemas/DatePeriod'
+            breakdown:
+              type: array
+              items:
+                type: object
+                properties:
+                  date:
+                    type: object
+                  totalReleased:
+                    type: number
+                  platformFee:
+                    type: number
+                  sellerReceived:
+                    type: number
+                  transactionCount:
+                    type: integer
+            totals:
+              type: object
+              properties:
+                totalReleased:
+                  type: number
+                platformFee:
+                  type: number
+                transactionCount:
+                  type: integer
+
+    RevenueTrendResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        data:
+          type: object
+          properties:
+            period:
+              $ref: '#/components/schemas/DatePeriod'
+            granularity:
+              type: string
+              enum: [day, week, month]
+            data:
+              type: array
+              items:
+                type: object
+                properties:
+                  date:
+                    type: object
+                  totalRevenue:
+                    type: number
+                  totalFees:
+                    type: number
+                  orderCount:
+                    type: integer
+                  averageOrderValue:
+                    type: number
+            summary:
+              type: object
+              properties:
+                totalRevenue:
+                  type: number
+                totalOrders:
+                  type: integer
+                avgOrderValue:
+                  type: number
+
+    OrderOverviewResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        data:
+          type: object
+          properties:
+            period:
+              $ref: '#/components/schemas/DatePeriod'
+            totalOrders:
+              type: integer
+            totalAmount:
+              type: number
+            averageOrderValue:
+              type: number
+
+    OrderStatusResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        data:
+          type: object
+          properties:
+            period:
+              $ref: '#/components/schemas/DatePeriod'
+            byStatus:
+              type: array
+              items:
+                $ref: '#/components/schemas/StatusBreakdown'
+            total:
+              type: integer
+
+    OrderTrendResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        data:
+          type: object
+          properties:
+            period:
+              $ref: '#/components/schemas/DatePeriod'
+            granularity:
+              type: string
+            data:
+              type: array
+              items:
+                type: object
+                properties:
+                  date:
+                    type: object
+                  orderCount:
+                    type: integer
+                  totalAmount:
+                    type: number
+                  averageOrderValue:
+                    type: number
+
+    PaymentMethodResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        data:
+          type: object
+          properties:
+            period:
+              $ref: '#/components/schemas/DatePeriod'
+            distribution:
+              type: array
+              items:
+                type: object
+                properties:
+                  provider:
+                    type: string
+                    enum: [Wallet, Momo, Vnpay, Zalopay, Unknown]
+                  count:
+                    type: integer
+                  totalAmount:
+                    type: number
+                  percentage:
+                    type: number
+            total:
+              type: integer
+
+    ComplaintOverviewResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        data:
+          type: object
+          properties:
+            period:
+              $ref: '#/components/schemas/DatePeriod'
+            totalComplaints:
+              type: integer
+            openComplaints:
+              type: integer
+            resolvedComplaints:
+              type: integer
+            avgResolutionTimeMinutes:
+              type: number
+            byStatus:
+              type: array
+              items:
+                $ref: '#/components/schemas/StatusBreakdown'
+            byCategory:
+              type: array
+              items:
+                type: object
+                properties:
+                  category:
+                    type: string
+                  count:
+                    type: integer
+                  percentage:
+                    type: number
+
+    ComplaintTrendResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        data:
+          type: object
+          properties:
+            period:
+              $ref: '#/components/schemas/DatePeriod'
+            granularity:
+              type: string
+            data:
+              type: array
+              items:
+                type: object
+                properties:
+                  date:
+                    type: object
+                  newComplaints:
+                    type: integer
+                  resolvedComplaints:
+                    type: integer
+
+    ResolutionStatsResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        data:
+          type: object
+          properties:
+            period:
+              $ref: '#/components/schemas/DatePeriod'
+            resolutionBreakdown:
+              type: array
+              items:
+                type: object
+                properties:
+                  type:
+                    type: string
+                    enum: [None, FullRefund, PartialRefund, Replace, Reject]
+                  count:
+                    type: integer
+                  totalRefundAmount:
+                    type: number
+            resolutionTime:
+              type: object
+              properties:
+                avgMinutes:
+                  type: number
+                minMinutes:
+                  type: number
+                maxMinutes:
+                  type: number
+            categoryBreakdown:
+              type: array
+              items:
+                type: object
+                properties:
+                  category:
+                    type: string
+                  count:
+                    type: integer
+
+    SLAComplianceResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        data:
+          type: object
+          properties:
+            period:
+              $ref: '#/components/schemas/DatePeriod'
+            slaTargets:
+              type: object
+              properties:
+                firstResponseHours:
+                  type: integer
+                  example: 4
+                resolutionHours:
+                  type: integer
+                  example: 48
+            metrics:
+              type: object
+              properties:
+                totalTickets:
+                  type: integer
+                slaBreachedCount:
+                  type: integer
+                slaComplianceRate:
+                  type: number
+                  description: Tỷ lệ tuân thủ SLA (%)
+                avgFirstResponseHours:
+                  type: number
+                avgResolutionHours:
+                  type: number
+                firstResponseSLARate:
+                  type: number
+                resolutionSLARate:
+                  type: number
+
+    ModeratorPerformanceResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        data:
+          type: object
+          properties:
+            period:
+              $ref: '#/components/schemas/DatePeriod'
+            moderators:
+              type: array
+              items:
+                type: object
+                properties:
+                  moderatorId:
+                    type: string
+                  moderatorName:
+                    type: string
+                  moderatorEmail:
+                    type: string
+                  totalAssigned:
+                    type: integer
+                  totalResolved:
+                    type: integer
+                  totalEscalated:
+                    type: integer
+                  resolutionRate:
+                    type: number
+                  avgResolutionTimeMinutes:
+                    type: number
+                  avgFirstResponseTimeMinutes:
+                    type: number
+                  fullRefunds:
+                    type: integer
+                  partialRefunds:
+                    type: integer
+                  rejections:
+                    type: integer
+                  slaBreaches:
+                    type: integer
+                  slaComplianceRate:
+                    type: number
+                  appealOverturnRate:
+                    type: number
+                  avgSatisfactionScore:
+                    type: number
+            summary:
+              type: object
+              properties:
+                totalModerators:
+                  type: integer
+                totalTicketsAssigned:
+                  type: integer
+                totalTicketsResolved:
+                  type: integer
+                avgResolutionRate:
+                  type: number
+
+    ShopRankingResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        data:
+          type: object
+          properties:
+            period:
+              $ref: '#/components/schemas/DatePeriod'
+            topByRevenue:
+              type: array
+              items:
+                $ref: '#/components/schemas/ShopRankingItem'
+            topByComplaints:
+              type: array
+              items:
+                $ref: '#/components/schemas/ShopRankingItem'
+            summary:
+              type: object
+              properties:
+                totalActiveShops:
+                  type: integer
+                avgRating:
+                  type: number
+                totalComplaints:
+                  type: integer
+
+    ShopRankingItem:
+      type: object
+      properties:
+        shopId:
+          type: string
+        shopName:
+          type: string
+        revenue:
+          type: number
+        orderCount:
+          type: integer
+        complaintCount:
+          type: integer
+        rating:
+          type: number
+        status:
+          type: string
+
+    TopSellingProductsResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        data:
+          type: object
+          properties:
+            period:
+              $ref: '#/components/schemas/DatePeriod'
+            products:
+              type: array
+              items:
+                $ref: '#/components/schemas/TopSellingProductItem'
+            summary:
+              type: object
+              properties:
+                totalProductsSold:
+                  type: integer
+                totalRevenue:
+                  type: number
+                totalOrders:
+                  type: integer
+
+    TopSellingProductItem:
+      type: object
+      properties:
+        productId:
+          type: string
+        productName:
+          type: string
+        shopId:
+          type: string
+        shopName:
+          type: string
+        thumbnail:
+          type: string
+          nullable: true
+        totalQuantitySold:
+          type: integer
+        totalRevenue:
+          type: number
+        orderCount:
+          type: integer
+        avgPrice:
+          type: number
+
+    # ==================== SELLER REPORT SCHEMAS ====================
+
+    SellerDashboardResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        data:
+          type: object
+          properties:
+            snapshot:
+              type: object
+              properties:
+                timestamp:
+                  type: string
+                  format: date-time
+            shopId:
+              type: string
+            shopName:
+              type: string
+            revenue:
+              type: object
+              properties:
+                todayRevenue:
+                  type: number
+                weekRevenue:
+                  type: number
+                monthRevenue:
+                  type: number
+                pendingPayout:
+                  type: number
+                  description: Số tiền chờ giải ngân (VND)
+                totalReceived:
+                  type: number
+                  description: Tổng tiền đã nhận (VND)
+            orders:
+              type: object
+              properties:
+                todayOrders:
+                  type: integer
+                pendingDelivery:
+                  type: integer
+                completed:
+                  type: integer
+            rating:
+              type: object
+              properties:
+                average:
+                  type: number
+                totalReviews:
+                  type: integer
+
+    SellerRevenueResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        data:
+          type: object
+          properties:
+            period:
+              $ref: '#/components/schemas/DatePeriod'
+            shopId:
+              type: string
+            totalSales:
+              type: number
+              description: Tổng doanh số (VND)
+            platformFee:
+              type: number
+              description: Phí nền tảng 5% (VND)
+            netRevenue:
+              type: number
+              description: Doanh thu ròng (VND)
+            pendingInEscrow:
+              type: number
+              description: Đang giữ trong escrow (VND)
+            released:
+              type: number
+              description: Đã giải ngân (VND)
+            refunded:
+              type: number
+              description: Đã hoàn (VND)
+
+    SellerRevenueTrendResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        data:
+          type: object
+          properties:
+            period:
+              $ref: '#/components/schemas/DatePeriod'
+            granularity:
+              type: string
+            shopId:
+              type: string
+            data:
+              type: array
+              items:
+                type: object
+                properties:
+                  date:
+                    type: object
+                  sales:
+                    type: number
+                  platformFee:
+                    type: number
+                  netRevenue:
+                    type: number
+                  orderCount:
+                    type: integer
+
+    SellerOrderOverviewResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        data:
+          type: object
+          properties:
+            period:
+              $ref: '#/components/schemas/DatePeriod'
+            shopId:
+              type: string
+            totalOrders:
+              type: integer
+            totalAmount:
+              type: number
+            averageOrderValue:
+              type: number
+            byStatus:
+              type: array
+              items:
+                $ref: '#/components/schemas/StatusBreakdown'
+
+    SellerOrderStatusResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        data:
+          type: object
+          properties:
+            period:
+              $ref: '#/components/schemas/DatePeriod'
+            shopId:
+              type: string
+            byStatus:
+              type: array
+              items:
+                $ref: '#/components/schemas/StatusBreakdown'
+            total:
+              type: integer
+
+    SellerOrderTrendResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        data:
+          type: object
+          properties:
+            period:
+              $ref: '#/components/schemas/DatePeriod'
+            granularity:
+              type: string
+            shopId:
+              type: string
+            data:
+              type: array
+              items:
+                type: object
+                properties:
+                  date:
+                    type: object
+                  orderCount:
+                    type: integer
+                  totalAmount:
+                    type: number
+                  averageOrderValue:
+                    type: number
+
+    # ==================== COMMON REPORT SCHEMAS ====================
+
+    DatePeriod:
+      type: object
+      properties:
+        startDate:
+          type: string
+          format: date-time
+        endDate:
+          type: string
+          format: date-time
+
+    StatusBreakdown:
+      type: object
+      properties:
+        status:
+          type: string
+        count:
+          type: integer
+        totalAmount:
+          type: number
+        percentage:
+          type: number
