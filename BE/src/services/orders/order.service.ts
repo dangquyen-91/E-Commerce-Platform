@@ -52,6 +52,10 @@ export class OrderService extends BaseService<IOrder> {
     session.startTransaction();
 
     try {
+      if (!Array.isArray(input.items) || input.items.length === 0) {
+        throw new AppError("Đơn hàng phải có ít nhất 1 sản phẩm", 400);
+      }
+
       // 1. Validate products and calculate total
       const productIds = input.items.map((item) => item.productId);
       const products = await Product.find({

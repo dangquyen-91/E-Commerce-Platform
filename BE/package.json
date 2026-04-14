@@ -12,7 +12,10 @@
         "type-check": "tsc --noEmit",
         "seed:users": "tsx src/scripts/seed-users.ts",
         "force:topup-success": "tsx src/scripts/force-topup-success.ts",
-        "test": "jest",
+        "test": "node scripts/jest-project-runner.js",
+        "test:all": "jest",
+        "test:inventory": "jest --selectProjects inventory",
+        "test:checkout": "jest --selectProjects checkout",
         "test:watch": "jest --watch",
         "test:coverage": "jest --coverage"
     },
