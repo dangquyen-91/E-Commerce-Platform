@@ -11,7 +11,10 @@
         "lint": "eslint src --ext .ts",
         "type-check": "tsc --noEmit",
         "seed:users": "tsx src/scripts/seed-users.ts",
-        "force:topup-success": "tsx src/scripts/force-topup-success.ts"
+        "force:topup-success": "tsx src/scripts/force-topup-success.ts",
+        "test": "jest",
+        "test:watch": "jest --watch",
+        "test:coverage": "jest --coverage"
     },
     "keywords": [
         "marketplace",
@@ -47,10 +50,11 @@
     "devDependencies": {
         "@types/bcryptjs": "^2.4.6",
         "@types/compression": "^1.7.5",
+        "@types/cookie": "^0.6.0",
         "@types/cookie-parser": "^1.4.7",
         "@types/cors": "^2.8.17",
-        "@types/cookie": "^0.6.0",
         "@types/express": "^5.0.0",
+        "@types/jest": "^30.0.0",
         "@types/jsonwebtoken": "^9.0.7",
         "@types/morgan": "^1.9.9",
         "@types/node": "^22.10.2",
@@ -59,7 +63,9 @@
         "@typescript-eslint/eslint-plugin": "^8.18.1",
         "@typescript-eslint/parser": "^8.18.1",
         "eslint": "^9.17.0",
+        "jest": "^30.3.0",
         "nodemon": "^3.1.11",
+        "ts-jest": "^29.4.9",
         "tsc-alias": "^1.8.16",
         "tsx": "^4.19.2",
         "typescript": "^5.7.2"

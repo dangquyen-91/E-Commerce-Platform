@@ -1,0 +1,5 @@
+{
+  // Dùng TypeScript của workspace thay vì built-in của VS Code
+  "typescript.tsdk": "BE/node_modules/typescript/lib",
+  "typescript.enablePromptUseWorkspaceTsdk": true
+}
