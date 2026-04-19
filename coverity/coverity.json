@@ -1,0 +1,47 @@
+{
+  "project": {
+    "name": "E-Commerce-Platform-Inventory",
+    "version": "1.0.0",
+    "description": "Coverity static analysis configuration for Inventory Management module"
+  },
+  "analysis": {
+    "languages": ["javascript", "typescript"],
+    "sources": [
+      "../BE/src/services/inventory",
+      "../BE/src/controllers/inventory",
+      "../BE/src/routes/inventory",
+      "../BE/src/models/products",
+      "../BE/src/utils/helpers.ts"
+    ],
+    "exclude": [
+      "../BE/node_modules",
+      "../BE/dist",
+      "../BE/src/scripts"
+    ]
+  },
+  "checkers": {
+    "enabled": [
+      "TAINTED_DATA",
+      "NULL_RETURNS",
+      "FORWARD_NULL",
+      "SWALLOWED_EXCEPTION",
+      "CHECKED_RETURN",
+      "RESOURCE_LEAK",
+      "TOCTOU",
+      "MISSING_CHECK",
+      "UNREACHABLE",
+      "DEAD_CODE",
+      "STRING_NULL"
+    ]
+  },
+  "severity_thresholds": {
+    "high": ["TAINTED_DATA", "TOCTOU", "NULL_RETURNS"],
+    "medium": ["SWALLOWED_EXCEPTION", "MISSING_CHECK", "STRING_NULL"],
+    "low": ["DEAD_CODE", "UNREACHABLE"]
+  },
+  "output": {
+    "format": "html",
+    "dir": "./cov-output",
+    "report_name": "inventory-defects-report"
+  }
+}

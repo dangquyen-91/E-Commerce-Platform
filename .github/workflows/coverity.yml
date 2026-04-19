@@ -1,0 +1,48 @@
+name: Coverity Scan — Inventory Management
+
+on:
+  push:
+    branches: [main, coverity]
+  workflow_dispatch:
+
+jobs:
+  coverity:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+
+      - name: Download Coverity Build Tool
+        run: |
+          wget -q https://scan.coverity.com/download/linux64 \
+            --post-data "token=${{ secrets.COVERITY_TOKEN }}&project=E-Commerce-Platform" \
+            -O coverity_tool.tar.gz
+          mkdir coverity_tool
+          tar xzf coverity_tool.tar.gz --strip 1 -C coverity_tool
+
+      - name: Configure Coverity for JavaScript/TypeScript
+        run: coverity_tool/bin/cov-configure --javascript
+
+      - name: Capture source files (Inventory module)
+        run: |
+          coverity_tool/bin/cov-build \
+            --dir cov-int \
+            --no-command \
+            --fs-capture-search BE/src/services/inventory \
+            --fs-capture-search BE/src/controllers/inventory \
+            --fs-capture-search BE/src/routes/inventory \
+            --fs-capture-search BE/src/models/products \
+            --fs-capture-search BE/src/utils \
+            --fs-capture-search coverity/demo-defects.ts
+
+      - name: Submit build to Coverity Scan
+        run: |
+          tar czvf E-Commerce-Platform.tgz cov-int
+          curl \
+            --form token="${{ secrets.COVERITY_TOKEN }}" \
+            --form email="${{ secrets.COVERITY_EMAIL }}" \
+            --form file=@E-Commerce-Platform.tgz \
+            --form version="1.0" \
+            --form description="Inventory Management Module — Static Analysis Demo" \
+            https://scan.coverity.com/builds?project=E-Commerce-Platform
