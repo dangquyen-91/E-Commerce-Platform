@@ -2,7 +2,39 @@
 ## Luồng Quản Lý Kho | E-Commerce Platform
 
 > **Thời lượng:** ~15–20 phút  
-> **Cấu trúc:** Mở đầu → Giới thiệu hệ thống → Demo Coverity → Phân tích Defect → Kết luận
+> **Cấu trúc:** Mở đầu → Giới thiệu hệ thống → Demo Coverity (file C) → Phân tích Defect → Liên hệ TypeScript → Kết luận
+
+---
+
+## PHẦN 0 — DEMO LIVE VỚI FILE C (3–5 phút)
+
+> *(Mở terminal, chạy trước khi bắt đầu thuyết trình hoặc live trong lúc demo)*
+
+---
+
+**Các lệnh chạy live:**
+
+```powershell
+# Bước 1 — cd vào Coverity
+cd D:\cov-analysis-win64-2024.12.1\cov-analysis-win64-2024.12.1
+
+# Bước 2 — Capture file C có defect
+.\bin\cov-build.exe --dir C:\cov-int-c "D:\winlibs-x86_64-posix-seh-gcc-15.2.0-mingw-w64ucrt-14.0.0-r7\mingw64\bin\gcc.exe" "D:\SWD\E-Commerce-Platform\coverity\demo.c"
+
+# Bước 3 — Tạo file nén
+cd C:\
+tar czvf D:\E-Commerce-Platform-c.tgz cov-int-c
+```
+
+Sau đó upload `D:\E-Commerce-Platform-c.tgz` lên **scan.coverity.com** → Submit Build.
+
+**Script nói khi chạy:**
+
+"Em đang chạy Coverity Build Capture — tool này intercept quá trình biên dịch GCC và thu thập thông tin về từng dòng code, từng biến, từng luồng dữ liệu. Kết quả là một thư mục `cov-int` chứa intermediate representation của toàn bộ code."
+
+"Bước tiếp theo là upload lên Coverity Scan cloud để server phân tích — server sẽ chạy hơn 1000 checker khác nhau trên code này."
+
+---
 
 ---
 
